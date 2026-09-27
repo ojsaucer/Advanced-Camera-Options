@@ -8,7 +8,7 @@ function G.clamp(n, lo, hi)
   return math.max(lo, math.min(hi, n))
 end
 
-function G.project(bounds, vw, vh, px, py, mode, zoom, referenceScale)
+function G.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, maxScale)
   for _, key in ipairs({ "x", "y", "w", "h" }) do
     assert(G.finite(bounds[key]), "Invalid camera bound: " .. key)
   end
@@ -16,12 +16,14 @@ function G.project(bounds, vw, vh, px, py, mode, zoom, referenceScale)
   assert(G.finite(px) and G.finite(py) and G.finite(zoom) and zoom > 0)
   assert(referenceScale == nil or (G.finite(referenceScale) and referenceScale > 0),
     "Invalid reference scale")
+  assert(maxScale == nil or (G.finite(maxScale) and maxScale > 0), "Invalid maximum scale")
   assert(bounds.w > 0 and bounds.h > 0)
   local x, y, w, h = bounds.x, bounds.y, bounds.w, bounds.h
   local scale = math.min(vw / w, vh / h)
   if mode == "partial" then
     -- Without a map-independent reference, retain the original area-relative fit.
     scale = math.max((referenceScale or scale) * zoom, vw / w, vh / h)
+    if maxScale then scale = math.min(scale, maxScale) end
     w, h = math.min(w, vw / scale), math.min(h, vh / scale)
     x = G.clamp(px + 8 - w / 2, bounds.x, bounds.x + bounds.w - w)
     y = G.clamp(py + 8 - h / 2, bounds.y, bounds.y + bounds.h - h)
@@ -30,16 +32,23 @@ function G.project(bounds, vw, vh, px, py, mode, zoom, referenceScale)
     dx = (vw - w * scale) / 2, dy = (vh - h * scale) / 2 }
 end
 
-function G.mix(kind, progress, w, h, reverse)
+function G.mix(kind, progress, w, h, direction)
   local p = G.clamp(progress, 0, 1)
   if kind == "fade" then
     return { 0, 0, math.max(0, 1 - 2 * p) },
       { 0, 0, math.max(0, 2 * p - 1) }
   end
-  local sign = reverse and -1 or 1
-  local dx = kind == "horizontal" and w * sign or 0
-  local dy = kind == "vertical" and h * sign or 0
+  local dx = direction == "east" and w or direction == "west" and -w or 0
+  local dy = direction == "south" and h or direction == "north" and -h or 0
+  assert(kind == "slide" and (dx ~= 0 or dy ~= 0), "Slide needs a crossing direction")
   return { -p * dx, -p * dy, 1 }, { (1 - p) * dx, (1 - p) * dy, 1 }
+end
+
+function G.intersection(a, b)
+  local x, y = math.max(a.x, b.x), math.max(a.y, b.y)
+  local r, bottom = math.min(a.x + a.w, b.x + b.w), math.min(a.y + a.h, b.y + b.h)
+  if r <= x or bottom <= y then return nil end
+  return { x = x, y = y, w = r - x, h = bottom - y }
 end
 
 G.directions = { { 0, -1, "up" }, { 0, 1, "down" },

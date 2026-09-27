@@ -1,7 +1,7 @@
 local Help = {}
 local function pack(...) return { n = select("#", ...), ... } end
 
-function Help.start(mod, rows, compatibility)
+function Help.start(mod, rows, compatibility, preview)
   if not compatibility.check("help") then return end
   local Runtime = require("src.mods.Runtime")
   local GameVersion = require("src.core.GameVersion")
@@ -10,9 +10,10 @@ function Help.start(mod, rows, compatibility)
   local Window = require("src.ui.game3.window")
   local Font = require("src.ui.game3.frlg_font")
   local lg = love.graphics
-  local details, zoomRow, zoomWarned = {}
+  local details, zoomRow, zoomWarned, transitionRow = {}
   for _, row in ipairs(rows) do
     if row.key == "zoom" and row.type == "number" then zoomRow = row end
+    if row.key == "transition" and row.type == "choice" then transitionRow = row end
     if type(row.key) == "string" and type(row.help) == "string" and row.help ~= "" then
       details[row.key] = { label = row.label or row.key, text = row.help }
     end
@@ -72,8 +73,9 @@ function Help.start(mod, rows, compatibility)
     local oldOptions, rawOptions = m.updateOptions, rawget(m, "updateOptions")
     local oldReset, rawReset = game.reset, rawget(game, "reset")
     local originalModule = layer.mod
-    local wrappedOptions, wrappedReset, proxy, panel, detached
+    local wrappedOptions, wrappedReset, proxy, panel, detached, previewMod
     local function close()
+      previewMod = nil
       if not panel then return end
       -- Remove only our actual layer, never somebody else's same-id layer.
       for i = #Stack._layers, 1, -1 do
@@ -103,8 +105,16 @@ function Help.start(mod, rows, compatibility)
       return m.screen == "options" and m.currentMod and m.currentMod.id == "static_camera"
         and not m.overlay and not Manager._prompt
     end
+    local function previewUsable()
+      if not previewMod then return false end
+      if not valid() or not scoped() or m.currentMod ~= previewMod or Stack.top() ~= layer then
+        previewMod = nil
+        return false
+      end
+      return true
+    end
     local function normalizeZoom()
-      if Runtime.safeMode or not zoomRow or not scoped() or Stack.top() ~= layer then return end
+      if previewMod or Runtime.safeMode or not zoomRow or not scoped() or Stack.top() ~= layer then return end
       local value = m:optionValue("static_camera", zoomRow)
       local number = value
       if type(number) ~= "number" or number ~= number or number == math.huge or number == -math.huge then
@@ -118,6 +128,17 @@ function Help.start(mod, rows, compatibility)
         mod.log:warn("Adjusted saved Static Camera zoom to %s%% to match the supported range and step.",
           tostring(number))
       end
+    end
+    local function normalizeTransition()
+      if previewMod or Runtime.safeMode or not transitionRow or not scoped() or Stack.top() ~= layer then return end
+      local value = m:optionValue("static_camera", transitionRow)
+      if value == "horizontal" or value == "vertical" then
+        m:setOption("static_camera", "transition", "slide")
+      end
+    end
+    local function normalizeSettings()
+      normalizeZoom()
+      normalizeTransition()
     end
     local function selected()
       local row = (m.optionRows or {})[m.cursor]
@@ -134,6 +155,37 @@ function Help.start(mod, rows, compatibility)
     end
     local function printLine(text, x, y, width)
       Window.printPx(text, x, y, { colors = Font.COLOR.NORMAL, maxWidth = width or 208 })
+    end
+    local function drawPreview()
+      local rendered, reason
+      if Runtime.safeMode then
+        reason = "Camera preview is disabled in safe mode. Restart with mods enabled."
+      elseif type(preview) ~= "table" or type(preview.draw) ~= "function" then
+        reason = "Camera preview renderer is unavailable. Restart after updating Static Camera."
+      else
+        -- Restore the UI target and graphics state even if the renderer throws.
+        local depth, canvas = lg.getStackDepth(), pack(lg.getCanvas())
+        lg.push("all")
+        local result = pack(pcall(preview.draw, game))
+        while lg.getStackDepth() > depth do lg.pop() end
+        lg.setCanvas(unpack(canvas, 1, canvas.n))
+        if not result[1] then error(result[2], 0) end
+        rendered, reason = result[2], result[3]
+      end
+      if rendered ~= true then
+        lg.setColor(0, 0, 0, 1)
+        lg.rectangle("fill", 0, 0, 240, 160)
+        lg.setColor(1, 1, 1, 1)
+        printLine("PREVIEW UNAVAILABLE", 16, 25)
+        if type(reason) ~= "string" or reason == "" then
+          reason = "The current game context does not support camera preview. Return to the overworld and try again."
+        end
+        for i, text in ipairs(pagesFor(reason)[1]) do printLine(text, 16, 58 + (i - 1) * 18) end
+      end
+      lg.setColor(0, 0, 0, 1)
+      lg.rectangle("fill", 0, 0, 64, 16)
+      lg.setColor(1, 1, 1, 1)
+      printLine("B:BACK", 4, 0, 60)
     end
     local function open(detail)
       local pages, page = pagesFor(detail.text), 1
@@ -178,19 +230,38 @@ function Help.start(mod, rows, compatibility)
     end
     wrappedOptions = function(self, input, ...)
       if not valid() then return oldOptions(self, input, ...) end
+      if previewMod then
+        previewUsable()
+        return
+      end
       if panel then return end
-      guarded(normalizeZoom)
       if scoped() and Stack.top() == layer and selected() and input:wasPressed("select") then
+        guarded(normalizeSettings)
         return guarded(open, selected())
       end
+      if scoped() and Stack.top() == layer and input:wasPressed("start") then
+        previewMod = m.currentMod
+        return
+      end
+      guarded(normalizeSettings)
       return guarded(oldOptions, self, input, ...)
     end
     proxy = setmetatable({
+      handleInput = function(input, ...)
+        if previewMod then
+          if previewUsable() and input:wasPressed("b") then close() end
+          return
+        end
+        return guarded(originalModule.handleInput, input, ...)
+      end,
       draw = function(...)
         if not valid() then return originalModule.draw(...) end
+        if previewUsable() then return guarded(drawPreview) end
+        guarded(normalizeTransition)
         local r = pack(guarded(originalModule.draw, ...))
-        if scoped() and Stack.top() == layer and selected() then
-          guarded(printLine, "Select:HELP", 32, 119, 176)
+        if scoped() and Stack.top() == layer then
+          if selected() then guarded(printLine, "Select:HELP", 32, 119, 176) end
+          guarded(printLine, "Start:PREVIEW", 32, 132, 176)
         end
         return unpack(r, 1, r.n)
       end,
@@ -202,8 +273,9 @@ function Help.start(mod, rows, compatibility)
     m.updateOptions, layer.mod, game.reset = wrappedOptions, proxy, wrappedReset
     return { game = game, manager = m, layer = layer, dispose = detach,
       valid = valid, refresh = function()
+        previewUsable()
         if panel and (not scoped() or not Stack.top() or Stack.top().mod ~= panel) then close() end
-        guarded(normalizeZoom)
+        guarded(normalizeSettings)
       end }
   end
   local function dispose()

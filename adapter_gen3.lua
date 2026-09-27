@@ -11,7 +11,7 @@ end
 function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
   if not compatibility.check("camera") then return end
   local capabilities = {}
-  for _, feature in ipairs({ "screen", "tilt", "terrain", "backdrop", "shade" }) do
+  for _, feature in ipairs({ "screen", "tilt", "terrain", "backdrop", "shade", "connections" }) do
     capabilities[feature] = compatibility.check(feature)
   end
   local Runtime = require("src.mods.Runtime")
@@ -20,6 +20,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
   local Player = require("src.core.game3.player")
   local Session = require("src.core.game3.runtime")
   local Map = require("src.core.game3.map")
+  local Connections = compatibility.modules["src.core.game3.connections"]
+  local BattleTransition = require("src.core.game3.battle_transition")
   local Collision = compatibility.modules["src.core.game3.collision"]
   local Tilt = require("src.render.Tilt")
   local Renderer = require("src.render.Renderer")
@@ -103,6 +105,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
     local envelopeKey, envelope
     local cache, cacheKey, cropKey, crop = {}, nil, nil, nil
     local published, failedScreenKey
+    local presentation = {}
     local backdrop = capabilities.backdrop and Backdrop.new(warn, shade)
     local backdropPixels = 0
 
@@ -127,6 +130,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       live, last, outgoing = nil, nil, nil
       valid, area, motion = nil, nil, nil
       projectionKey = nil
+      presentation.crossing = nil
     end
     local function clear()
       clearCanvases()
@@ -157,7 +161,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         or active("src.ui.game3.shop_menu", "isShopCamera")
         or active("src.ui.game3.seagallop", "isActive")
         or active("src.core.game3.camera_object", "isActive")
-        or active("src.core.game3.battle_transition", "isActive")
+        or (BattleTransition.isActive() and BattleTransition._opts and BattleTransition._opts.overUi)
         or active("src.core.game3.bg", "hasVisible") then return true end
       local oam = require("src.core.game3.oam")
       for _, sprite in pairs(oam._sprites or {}) do
@@ -226,8 +230,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       if not capabilities.screen then return w, h, false end
       -- A larger intermediate alone would be downsampled by worldCanvas.
       -- Only publish a native image when the real world compositor owns this pass.
-      if not Renderer.worldActive or lg.getCanvas() ~= Renderer.worldCanvas
-        or (Renderer.worldOverride and Renderer.worldOverride ~= published) then
+      if not presentation.previewing and (not Renderer.worldActive or lg.getCanvas() ~= Renderer.worldCanvas
+        or (Renderer.worldOverride and Renderer.worldOverride ~= published)) then
         warn("screen-path", "Screen-resolution output unavailable in this presentation; using Retro.")
         return w, h, false
       end
@@ -262,11 +266,13 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
     local function field(nextDraw, g, w, h, opts)
       if g ~= game or protected(opts) then
         valid, area, motion = nil, nil, nil
+        presentation.crossing = nil
         return nextDraw(g, w, h, opts)
       end
       local mode = choice("mode", "normal", { full = true, partial = true, normal = true })
       if mode == "normal" then return nextDraw(g, w, h, opts) end
       w, h = w or 240, h or 160
+      if not presentation.previewing then presentation.viewW, presentation.viewH = w, h end
       local session = Session.getSession()
       local id = session and session.map
       local def = id and game.data and game.data.maps and game.data.maps[id]
@@ -327,16 +333,23 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         warn("crop-expanded", "Player left the cached terrain crop; expanding it to keep them visible.")
         bounds.x, bounds.y, bounds.w, bounds.h = left, top, right - left, bottom - top
       end
+      local normalScale = screen and Zoom.scale(Renderer:fitScale()) or 1
+      local limit = number("max_zoom", 0, 0, 200)
+      local maxScale = limit > 0 and normalScale * math.max(5, math.floor(limit / 5 + 0.5) * 5) / 100 or nil
+      local connected = mode == "full" and mod.options:get("connected") == true and capabilities.connections
       local referenceScale
       if mode == "partial" and choice("zoom_style", "consistent",
         { consistent = true, relative = true }) == "consistent" then
         -- Retro is enlarged later by the engine. Native output bypasses that
         -- blit, so apply its exact scale here, not a rounded viewport ratio.
-        referenceScale = screen and Zoom.scale(Renderer:fitScale()) or 1
+        referenceScale = normalScale
       end
       local signature = table.concat({ mode, framing, number("padding", 1, 0, 4),
-        tilted and Tilt.angle or "flat", referenceScale or "relative", zoomLevel(), fill }, ":")
-      if projectionKey ~= signature then valid, area, motion = nil, nil, nil end
+        tilted and Tilt.angle or "flat", referenceScale or "relative", zoomLevel(), fill,
+        maxScale or "uncapped", tostring(connected) }, ":")
+      if projectionKey ~= signature then
+        valid, area, motion, presentation.crossing = nil, nil, nil, nil
+      end
       projectionKey = signature
       local frame
       if tilted then
@@ -373,15 +386,60 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         end
         envelope = nextEnvelope
         frame = tiltModules.geometry.project(bounds, renderW, renderH, Player.px, Player.py,
-          mode, zoomLevel(), referenceScale, Tilt, envelope)
+          mode, zoomLevel(), referenceScale, Tilt, envelope, maxScale)
       else
         frame = G.project(bounds, renderW, renderH, Player.px, Player.py, mode,
-          zoomLevel(), referenceScale)
+          zoomLevel(), referenceScale, maxScale)
+      end
+      local scopedWorld = { { id = id, def = def, ox = 0, oy = 0 } }
+      local terrain = { bounds }
+      if connected then
+        for _, conn in ipairs(Connections.each(def)) do
+          local neighbor = game.data.maps[conn.map]
+          if neighbor and conn.map ~= id then
+            Map.ensureMidLayout(game, conn.map, neighbor)
+            local nw, nh = Connections.sizeOf(neighbor)
+            if neighbor.midLayout and G.finite(nw) and G.finite(nh) and nw > 0 and nh > 0
+              and nw * nh <= 32768 and G.finite(conn.offset) then
+              local ox = conn.dir == "east" and layout.width or conn.dir == "west" and -nw or conn.offset
+              local oy = conn.dir == "south" and layout.height or conn.dir == "north" and -nh or conn.offset
+              scopedWorld[#scopedWorld + 1] = { id = conn.map, def = neighbor, ox = ox, oy = oy }
+              terrain[#terrain + 1] = { x = ox * 16, y = oy * 16, w = nw * 16, h = nh * 16 }
+            else
+              warn("neighbor-" .. conn.map, "Connected map has unsupported terrain: " .. conn.map)
+            end
+          end
+        end
+      end
+      local visible = { x = frame.x - frame.dx / frame.scale, y = frame.y - frame.dy / frame.scale,
+        w = renderW / frame.scale, h = renderH / frame.scale }
+      if tilted then
+        local l, t, r, b = math.huge, math.huge, -math.huge, -math.huge
+        local top = math.max(0, frame.horizon + 0.5)
+        for _, p in ipairs({ { 0, top }, { renderW, top }, { renderW, renderH }, { 0, renderH } }) do
+          local x, y = frame.worldAt(p[1], p[2])
+          l, t, r, b = math.min(l, x), math.min(t, y), math.max(r, x), math.max(b, y)
+        end
+        visible = { x = l, y = t, w = r - l, h = b - t }
+      end
+      local coverage = {}
+      local captureBounds = { x = frame.x, y = frame.y, w = frame.w, h = frame.h }
+      for _, rect in ipairs(terrain) do
+        local clipped = G.intersection(rect, visible)
+        if clipped then
+          coverage[#coverage + 1] = clipped
+          if connected then
+            local r = math.max(captureBounds.x + captureBounds.w, clipped.x + clipped.w)
+            local b = math.max(captureBounds.y + captureBounds.h, clipped.y + clipped.h)
+            captureBounds.x, captureBounds.y = math.min(captureBounds.x, clipped.x), math.min(captureBounds.y, clipped.y)
+            captureBounds.w, captureBounds.h = r - captureBounds.x, b - captureBounds.y
+          end
+        end
       end
       -- Assemble packed atlas tiles at integer 1:1 coordinates, as vanilla does.
       -- Guard texels cover fractional camera movement before the final crop.
-      local captureX, captureY = math.floor(frame.x) - 1, math.floor(frame.y) - 1
-      local captureW, captureH = math.ceil(frame.w) + 3, math.ceil(frame.h) + 3
+      local captureX, captureY = math.floor(captureBounds.x) - 1, math.floor(captureBounds.y) - 1
+      local captureW, captureH = math.ceil(captureBounds.w) + 3, math.ceil(captureBounds.h) + 3
       local nativeFlip = screen and Renderer.mirrorsWorldOverride and Renderer.mirrorsWorldOverride()
       local rasterOK, rasterError = pcall(function()
         if not tilted and not nativeFlip and upright then release(upright); upright = nil end
@@ -406,14 +464,17 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         warn("raster", "Camera disabled after world raster allocation failure: " .. tostring(rasterError))
         return nextDraw(g, w, h, opts)
       end
-      local key = tostring(id) .. ":" .. tostring(layout) .. ":" .. captureW .. ":" .. captureH
+      local key = tostring(id) .. ":" .. tostring(layout) .. ":" .. captureW .. ":" .. captureH .. ":" .. tostring(connected)
+      for _, entry in ipairs(scopedWorld) do
+        key = key .. ":" .. entry.id .. ":" .. tostring(entry.def.midLayout) .. ":" .. entry.ox .. ":" .. entry.oy
+      end
       if cacheKey ~= key then clearCache(); cacheKey = key end
 
       local saved = {}
       local billboard = Field._billboard
       local panX, panY, spans = Field.cameraPanX, Field.cameraPanY, Field.flashSpansFor
       local dirty = Field._nativeDirty
-      local world, refresh, sample = Map.world, Map.refreshWorld, Map.worldMidAt
+      local world, refresh, sample, neighbors = Map.world, Map.refreshWorld, Map.worldMidAt, Map.neighborList
       for _, k in ipairs(cacheKeys) do saved[k], Field[k] = Field[k], cache[k] end
       if dirty then Field._nativeDirty = true end
       Field.cameraPanX = captureX - math.floor(Player.px + 8 - captureW / 2)
@@ -422,11 +483,14 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         return spans(radius, fw, fh, Player.px + 8 - captureX, Player.py + 8 - captureY)
       end
       -- Scope connected-map isolation to this synchronous draw, never simulation.
-      Map.world = { { id = id, def = def, ox = 0, oy = 0 } }
+      Map.world = scopedWorld
+      Map.neighborList = {}
       Map.refreshWorld = function() return Map.world end
-      Map.worldMidAt = function(x, y)
-        return layout:midAt(x, y), def.pair or layout.pair,
-          x < 0 or y < 0 or x >= layout.width or y >= layout.height
+      if not connected then
+        Map.worldMidAt = function(x, y)
+          return layout:midAt(x, y), def.pair or layout.pair,
+            x < 0 or y < 0 or x >= layout.width or y >= layout.height
+        end
       end
       local rendered = pack(pcall(fenced, function()
         lg.setCanvas(raster)
@@ -447,7 +511,9 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
           lg.clear(0, 0, 0, 1)
           lg.setColor(1, 1, 1, 1)
           if backdrop then backdrop.draw(border, frame, renderW, renderH, tiltModules.render, Renderer) end
-          tiltModules.render.ground(Renderer, raster, frame, captureX, captureY, captureW, captureH)
+          for _, rect in ipairs(coverage) do
+            tiltModules.render.ground(Renderer, raster, frame, captureX, captureY, captureW, captureH, rect)
+          end
           lg.setCanvas(upright)
           lg.clear(0, 0, 0, 0)
           lg.setBlendMode("alpha", "alphamultiply")
@@ -461,7 +527,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
           lg.draw(upright)
         end
       end))
-      Map.world, Map.refreshWorld, Map.worldMidAt = world, refresh, sample
+      Map.world, Map.refreshWorld, Map.worldMidAt, Map.neighborList = world, refresh, sample, neighbors
       Field.cameraPanX, Field.cameraPanY, Field.flashSpansFor = panX, panY, spans
       Field._billboard = billboard
       for _, k in ipairs(cacheKeys) do cache[k], Field[k] = Field[k], saved[k] end
@@ -486,24 +552,34 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         lg.clear(0, 0, 0, 1)
         lg.setColor(1, 1, 1, 1)
         if backdrop then backdrop.draw(border, frame, renderW, renderH) end
-        lg.setScissor(frame.dx, frame.dy, frame.w * frame.scale, frame.h * frame.scale)
-        lg.draw(raster, frame.dx + (captureX - frame.x) * frame.scale,
-          frame.dy + (captureY - frame.y) * frame.scale, 0, frame.scale, frame.scale)
+        for _, rect in ipairs(coverage) do
+          lg.setScissor(frame.dx + (rect.x - frame.x) * frame.scale,
+            frame.dy + (rect.y - frame.y) * frame.scale, rect.w * frame.scale, rect.h * frame.scale)
+          lg.draw(raster, frame.dx + (captureX - frame.x) * frame.scale,
+            frame.dy + (captureY - frame.y) * frame.scale, 0, frame.scale, frame.scale)
+        end
       end) end
 
       local now = love.timer.getTime()
       local kind = choice("transition", "none",
-        { none = true, fade = true, horizontal = true, vertical = true })
+        { none = true, fade = true, slide = true, horizontal = true, vertical = true })
+      if kind == "horizontal" or kind == "vertical" then kind = "slide" end
       -- Doors/warps already fade out, load under cover, and fade back in.
       -- Rebase the camera under that cover rather than queue a second effect.
-      if Warp.isBusy() or Fade.isActive() or (Fade.t or 0) > 0 then
+      local battle = BattleTransition.isActive()
+      if presentation.previewing or battle or Warp.isBusy() or Fade.isActive() or (Fade.t or 0) > 0 then
         motion = nil
       elseif valid and id ~= area and kind ~= "none" then
-        last, outgoing = outgoing, last
-        motion = { start = now, kind = kind,
-          duration = number("duration", 350, 50, 2000) / 1000,
-          reverse = mod.options:get("reverse") == true }
+        local crossing = presentation.crossing
+        local direction = crossing and crossing.from == area and crossing.to == id and crossing.direction
+        motion = nil
+        if kind == "fade" or direction then
+          last, outgoing = outgoing, last
+          motion = { start = now, kind = kind, direction = direction,
+            duration = number("duration", 350, 50, 2000) / 1000 }
+        end
       elseif kind == "none" then motion = nil end
+      presentation.crossing = nil
       area = id
       fenced(function()
         lg.setCanvas(last)
@@ -516,7 +592,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
           local p = (now - motion.start) / motion.duration
           if p >= 1 then motion = nil
           else
-            local a, b = G.mix(motion.kind, p, renderW, renderH, motion.reverse)
+            local a, b = G.mix(motion.kind, p, renderW, renderH, motion.direction)
             paint(outgoing, a)
             paint(live, b)
           end
@@ -531,7 +607,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         lg.scale(w / renderW, h / renderH)
         paint(last, { 0, 0, 1 })
       end)
-      if screen then
+      if screen and not battle and not presentation.previewing then
         local output = last
         if nativeFlip then
           -- This is an ordinary LOVE canvas, not a pre-flipped 3D pipeline.
@@ -564,6 +640,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         return oldDraw(self, ...)
       end
       local previous, tiltActive, seen = Field.draw, Tilt.active, false
+      presentation.previewDrawn = false
+      presentation.previewFieldDraw = previous
       tiltRequested = tiltActive()
       local wrapper = function(...)
         seen = true
@@ -574,11 +652,14 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       -- Display splitting this field pass or Renderer projecting it a second time.
       Tilt.active = function() return false end
       local r = pack(pcall(oldDraw, self, ...))
+      presentation.previewFieldDraw = nil
       if Field.draw == wrapper then Field.draw = previous end
       Tilt.active = tiltActive
       if published and Renderer.worldOverride == published then Renderer:setWorldOverride(nil) end
       published = nil
-      if not seen then valid, area, motion = nil, nil, nil end
+      if not seen and not presentation.previewDrawn then
+        valid, area, motion, presentation.crossing = nil, nil, nil, nil
+      end
       return result(r)
     end
     reset = function(self, ...)
@@ -586,7 +667,56 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       return oldReset(self, ...)
     end
     game.draw, game.reset = draw, reset
-    return { game = game, dispose = detach }
+    return { game = game, dispose = detach,
+      crossing = function(event)
+        presentation.crossing = nil
+        if not capabilities.connections or event.via ~= "connection" or event.fromMapId ~= area then return end
+        local source = game.data and game.data.maps and game.data.maps[event.fromMapId]
+        local matches, count, direction = {}, 0
+        for _, conn in ipairs(Connections.each(source)) do
+          if conn.map == event.mapId and not matches[conn.dir] then
+            matches[conn.dir], count, direction = true, count + 1, conn.dir
+          end
+        end
+        if count > 1 then
+          local facing = Connections.cardinal(Player.facing)
+          direction = matches[facing] and facing or nil
+        end
+        if direction then
+          presentation.crossing = { from = event.fromMapId, to = event.mapId, direction = direction }
+        end
+      end,
+      preview = function()
+        if detached or fault or not alive() or not compatibility.allowed() or protected()
+          or BattleTransition.isActive() then
+          return false, "Preview unavailable in this scene."
+        end
+        if mod.options:get("mode") == "normal" then return false, "Choose FULL or BOUNDED to preview." end
+        local session = Session.getSession()
+        local def = session and game.data and game.data.maps and game.data.maps[session.map]
+        if not def or not def.midLayout then return false, "Enter a map before previewing." end
+        local w, h = presentation.viewW or 240, presentation.viewH or 160
+        local oldRequested, oldActive = tiltRequested, Tilt.active
+        if not presentation.previewDrawn then tiltRequested = oldActive() or tiltRequested end
+        presentation.previewing, presentation.previewDrawn = true, true
+        Tilt.active = function() return false end
+        local r = pack(pcall(fenced, function()
+          if type(Renderer.worldViewSize) == "function" then w, h = Renderer:worldViewSize() end
+          assert(G.finite(w) and G.finite(h) and w > 0 and h > 0, "Invalid preview viewport")
+          lg.origin()
+          lg.setShader()
+          lg.setScissor()
+          lg.setColor(0, 0, 0, 1)
+          lg.rectangle("fill", 0, 0, 240, 160)
+          local scale = math.min(240 / w, 160 / h)
+          lg.translate((240 - w * scale) / 2, (160 - h * scale) / 2)
+          lg.scale(scale, scale)
+          field(presentation.previewFieldDraw or Field.draw, game, w, h)
+        end))
+        presentation.previewing, tiltRequested, Tilt.active = false, oldRequested, oldActive
+        result(r)
+        return true
+      end }
   end
 
   local function dispose()
@@ -605,10 +735,17 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
     return unpack(r, 1, r.n)
   end
   mod.hooks:wrap("core.update", update)
+  mod.events:on("map.entered", function(event)
+    if attachment and compatibility.allowed() then attachment.crossing(event) end
+  end)
   mod.hooks:wrap("core.quit_to_launcher", function(nextQuit) dispose(); return nextQuit() end)
   if compatibility.allowed() then
     mod.log:info("Gen 3 camera capability checks passed for engine %s.", compatibility.engine)
   end
+  return { draw = function(game)
+    if not attachment or attachment.game ~= game then return false, "Start the game before previewing." end
+    return attachment.preview()
+  end }
 end
 
 return Adapter

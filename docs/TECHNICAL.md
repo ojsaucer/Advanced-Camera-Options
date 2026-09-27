@@ -36,7 +36,9 @@ References:
   instance. Normal mode delegates to the engine.
 - Only during a synchronous field draw, the adapter isolates the current map
   and temporarily adjusts field panning, sampling, tile caches and Flash coordinates.
-  Player/world simulation state is not moved.
+  Player/world simulation state is not moved. With connected context enabled,
+  a render-only list of direct neighbors replaces isolation; world-cache metadata
+  and the original neighbor list are restored after the draw.
 - Tiles are first assembled at integer world-pixel coordinates into a staging
   canvas. Guard pixels prevent packed-atlas seams during fractional scaling.
 - SCREEN uses physical viewport dimensions and the engine's world override.
@@ -46,7 +48,7 @@ References:
   hidden or retried midway through the same frame. A faulted camera uses the
   original draw path on subsequent frames.
 
-Special shop cameras, camera panning, hidden-actor cutscenes, battle transitions,
+Special shop cameras, camera panning, hidden-actor cutscenes, over-UI transitions,
 hardware backgrounds and deferred world overlays retain the original field
 renderer. Ordinary dialogue does not disable the camera. Other camera-replacement
 mods have not been certified together.
@@ -60,8 +62,10 @@ clamped to the current map. Exceptional movement outside a cached crop can
 expand it, with a warning.
 
 Consistent zoom uses scale 1 in Retro and the engine's exact physical world scale
-in SCREEN. Area-relative zoom multiplies the whole-area fit. Both enforce a
-minimum scale to contain the viewport; 5% is selectable but not always achievable.
+in SCREEN. Area-relative zoom multiplies the whole-area fit. With MAX ZOOM off,
+both enforce a minimum scale to contain the viewport. The optional ceiling uses
+normal-engine scale independently of the zoom basis and overrides that minimum.
+Undersized axes are centered, with only actual terrain composited over the backdrop.
 
 The mod limits layouts to 32768 metatiles and viewports to 8192 pixels per axis
 or the GPU's lower texture limit. It targets a 128 MiB budget for its own canvases,
@@ -177,3 +181,32 @@ release exists. It uses release assets, not Actions artifacts or GitHub source
 archives. Its ordinary update path does not automatically verify the separate
 SHA-256 sidecar. Public release checks should verify the selected asset, download
 hash and packed metadata separately.
+
+## 0.11.0 camera and preview changes
+
+- Connected context retains primary fit inputs. Direct placements use the native
+  connection directions, offsets and layout sizes. Terrain is clipped per map,
+  rather than drawing an opaque rectangle over gaps between neighbors.
+- Slides consume `map.entered` connection events. Ambiguous directions use the
+  crossing facing only if it matches a connection; unknown directions do not
+  slide. Legacy horizontal/vertical values are accepted and normalized in options.
+- Ordinary battle entry keeps the mod projection and downsamples into the native
+  world canvas. No unprocessed Screen override bypasses the native effect.
+  Effect timing, callbacks and UI composition remain engine-owned.
+- Start-preview replaces only this mod's options drawing. It calls the adapter's
+  render-only entry point, not `game.draw`, and does not change stack fullscreen
+  flags. B restores the unchanged menu. Current settings are rendered afresh.
+
+Validation with both actual engine module sets and original synthetic fixtures:
+
+| Engine | Headless camera | Preview UI | Real LÖVE graphics |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 7,303 | 149 | 15,378 |
+| 0.3.22 | 7,303 | 149 | 15,390 |
+
+Graphics coverage includes capped interiors with BLACK/GAME fill, offset neighbor
+tilesets and gaps, four slide directions, native mask/redraw/battle effects,
+unchanged battle framing and callbacks, and the actual preview renderer.
+Imported battle chrome/assets and every gameplay scene still need in-game testing.
+Run `tests/preview_test.lua` separately with the same headless harness paths;
+the camera suite includes the graphics feature tests when run under LÖVE.

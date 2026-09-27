@@ -22,10 +22,12 @@ function T.inverse(x, y, vw, vh, angle, focal)
   return (x - vw / 2) * (d - w * math.sin(angle)) / d, w
 end
 
-function T.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, Tilt, envelope)
+function T.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, Tilt, envelope, maxScale)
   local angle, focal = Tilt.angle, Tilt.FOCAL
   assert(angle >= 0 and angle <= math.rad(50) + 1e-8 and focal > 0,
     "Unsupported Tilt projection")
+  assert(maxScale == nil or (type(maxScale) == "number" and maxScale > 0
+    and maxScale < math.huge), "Invalid maximum scale")
   local groundPoint = Tilt.groundPoint
   envelope = envelope or T.envelope({})
   local margin = math.max(160, envelope.left, envelope.right, envelope.top, envelope.bottom)
@@ -65,7 +67,12 @@ function T.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, Tilt, env
     end
     scale = math.max((referenceScale or fullScale) * zoom,
       (r - l) / bounds.w, (b - t) / bounds.h)
-    local function clamp(n, low, high) return math.max(low, math.min(high, n)) end
+    if maxScale then scale = math.min(scale, maxScale) end
+    local function clamp(n, low, high)
+      -- An undersized axis has no containing position; center its footprint instead.
+      if maxScale and low > high then return (low + high) / 2 end
+      return math.max(low, math.min(high, n))
+    end
     cx = clamp(px + 8, bounds.x - l / scale, bounds.x + bounds.w - r / scale)
     cy = clamp(py + 8, bounds.y - t / scale, bounds.y + bounds.h - b / scale)
     for _, p in ipairs(footprint) do p[1], p[2] = cx + p[1] / scale, cy + p[2] / scale end

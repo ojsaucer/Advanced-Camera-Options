@@ -106,6 +106,10 @@ return function(ctx)
       Renderer:beginFrame(true)
       Renderer:beginWorldPass()
       ctx.Field.draw(self, Renderer:worldViewSize())
+      self.hadOverride = Renderer.worldOverride ~= nil
+      if self.battleTransition then
+        self.battleTransition.drawWorld(Renderer.worldCanvas, Renderer:worldViewSize())
+      end
       if Renderer.worldOverride then
         nativeWidth, nativeHeight = Renderer.worldOverride:getDimensions()
       else nativeWidth, nativeHeight = nil, nil end
@@ -117,6 +121,7 @@ return function(ctx)
       lg.rectangle("fill", 10, 10, 20, 10)
       lg.setColor(1, 1, 1, 1)
       if self.engineFade then require("src.ui.game3.fade").draw() end
+      if self.battleTransition then self.battleTransition.draw() end
       Renderer:endFrame()
     end
     ctx.Runtime.call("core.update", function() end, scene, 0)
@@ -179,16 +184,21 @@ return function(ctx)
     T.check(r > 0.99 and green < 0.01, "GPU: engine world fade does not darken UI")
     faded:release()
     scene.fade = nil
+    assert(loadfile(ctx.root .. "\\tests\\camera_features_test.lua"))()({
+      T = T, root = ctx.root, native = ctx.native, settings = settings, scene = scene,
+      capture = capture, seen = ctx.seen, nativeBattle = ctx.nativeBattle,
+      worldSample = ctx.worldSample, crossing = ctx.crossing, setTime = ctx.setTime,
+    })
     assert(loadfile(ctx.root .. "\\tests\\seam_test.lua"))()({
       T = T, native = ctx.native, settings = settings, capture = capture,
     })
     assert(loadfile(ctx.root .. "\\tests\\tilt_test.lua"))()({
       T = T, root = ctx.root, native = ctx.native, settings = settings,
-      capture = capture, scene = scene, setTime = ctx.setTime,
+      capture = capture, scene = scene, setTime = ctx.setTime, crossing = ctx.crossing,
     })
     assert(loadfile(ctx.root .. "\\tests\\void_fill_test.lua"))()({
       T = T, root = ctx.root, settings = settings, capture = capture, scene = scene,
-      seen = ctx.seen, setTime = ctx.setTime,
+      seen = ctx.seen, setTime = ctx.setTime, crossing = ctx.crossing,
     })
 
     local Zoom = require("src.render.Zoom")
@@ -351,6 +361,7 @@ return function(ctx)
       ctx.native.image = priorImage
       ctx.setTime(30)
       capture("screen", 1, 720, 480):release()
+      ctx.crossing(scene, "SECOND", effect == "vertical" and "south" or "east")
       Session.session.map, ctx.Field._flashMapId = "SECOND", "SECOND"
       ctx.native.image = redImage
       ctx.setTime(31)

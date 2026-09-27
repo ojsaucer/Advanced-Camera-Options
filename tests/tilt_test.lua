@@ -66,6 +66,29 @@ return function(ctx)
   local corner = Geometry.project(bounds, 240, 160, 0, 464, "partial", 2, 1, Tilt)
   local cornerX = corner.point(8, 480)
   T.check(cornerX < 0, "documented lower-corner clipping is retained by strict Bounded Tilt")
+  for _, degrees in ipairs({ 0, 15, 35, 50 }) do
+    Tilt.angle = math.rad(degrees)
+    for _, b in ipairs({ { x = 32, y = 48, w = 32, h = 32 },
+      { x = 16, y = 32, w = 32, h = 640 }, bounds }) do
+      for _, cap in ipairs({ 0.05, 0.5, 1, 2 }) do
+        for _, pos in ipairs({ -1000, 1000 }) do
+          local f = Geometry.project(b, 240, 160, pos, pos, "partial", 2, 1, Tilt, nil, cap)
+          T.check(f.scale <= cap, "Tilt maximum overrides boundary and requested zoom")
+          T.check(f.w > 0 and f.h > 0 and f.x >= b.x and f.y >= b.y
+            and f.x + f.w <= b.x + b.w + 1e-7 and f.y + f.h <= b.y + b.h + 1e-7,
+            "capped Tilt raster is a valid intersection with the area")
+          if f.ground.w > b.w then
+            T.check(math.abs(f.ground.x + f.ground.w / 2 - b.x - b.w / 2) < 1e-7,
+              "undersized Tilt horizontal footprint is centered")
+          end
+          if f.ground.h > b.h then
+            T.check(math.abs(f.ground.y + f.ground.h / 2 - b.y - b.h / 2) < 1e-7,
+              "undersized Tilt vertical footprint is centered")
+          end
+        end
+      end
+    end
+  end
   Tilt.angle, Tilt.level = originalAngle, originalLevel
   if not love._staticCameraGpu or not ctx.capture then return end
 
@@ -335,6 +358,7 @@ return function(ctx)
             ctx.setTime(100)
             ctx.capture(resolution, 1, 720, 480):release()
             ctx.native.image = redImage
+            ctx.crossing(ctx.scene, "SECOND", effect == "vertical" and "south" or "east")
             Session.session.map, Field._flashMapId = "SECOND", "SECOND"
             ctx.setTime(101)
             ctx.capture(resolution, 1, 720, 480):release()

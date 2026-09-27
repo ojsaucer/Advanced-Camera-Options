@@ -279,6 +279,7 @@ return function(ctx)
       ctx.setTime(30)
       FieldWeather.setWeather(Weather.SHADE)
       ctx.capture("screen", 1, 720, 480):release()
+      ctx.crossing(scene, "SECOND", "east")
       Session.session.map, Field._flashMapId = "SECOND", "SECOND"
       FieldWeather.setWeather(Weather.NONE)
       ctx.setTime(31)

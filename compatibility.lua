@@ -34,6 +34,10 @@ local groups = {
     { "src.core.game3.collision", "ledgeLanding", "inBounds", "isWalkable", "isWater",
       "directionallyImpassable", "elevationAt", "elevationMismatchOn" },
   },
+  connections = {
+    { "src.core.game3.connections", "each", "sizeOf", "cardinal" },
+    { "src.core.game3.map", "ensureMidLayout" },
+  },
   backdrop = {
     { "src.core.game3.void_fill", "normalize", "primaryFor", "fillAt", "borderFor" },
     { "src.core.game3.tileset_native", "get", "hasMid", "slotFor", "quad", "overQuad" },

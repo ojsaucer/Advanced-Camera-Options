@@ -20,13 +20,21 @@ scrolling past map edges, or the game's normal camera.
   smaller in the distance and larger near the camera.
 - **Adjustable zoom:** 5-200% in 5% steps for Bounded mode. Keep a consistent
   zoom between areas or make it relative to each area's size.
+- **Comfortable interiors:** optionally cap Bounded zoom so small rooms do not
+  become excessively enlarged. Leftover space uses your selected backdrop.
+- **Connected scenery:** optionally show directly connected maps around Full
+  mode's view without shrinking the current area.
 - **Clearer zoomed-out views:** optional Screen Resolution preserves more detail
   without making dialogue or menus larger.
 - **Matching backgrounds:** optionally use the game's Void Fill choice around
   the area, following Tilt and forest shade.
-- **Area transitions:** choose fade, horizontal scroll, vertical scroll or no
-  added transition.
+- **Area transitions:** choose fade, a slide toward the connected area you enter,
+  or no added transition.
+- **Smoother battle entry:** keep the current camera framing while the game's
+  battle animation plays.
 - **Built-in help:** highlight any mod setting and press **Select**.
+- **Settings preview:** press **Start** in the mod's in-game options to preview
+  the paused scene, then **B** to return.
 
 The project is called **Advanced Camera Options** on GitHub. It appears as
 **Static Camera** in the game; that name and its mod ID are kept so existing
@@ -116,13 +124,14 @@ compatibility. Most changes take effect immediately.
 | **CAMERA MODE** | **FULL** shows the whole area; **BOUNDED** follows within its edges; **NORMAL** restores the game's camera. |
 | **ZOOM BASIS** | **NORMAL** keeps zoom consistent between areas. **AREA FIT** bases it on the whole-area view instead. |
 | **BOUNDED ZOOM %** | **5-200%**, in **5% steps**. Higher means closer. Only affects Bounded mode. |
+| **MAX ZOOM** | **OFF**, or **5-200%** in 5% steps. Caps Bounded zoom at a percentage of normal engine scale, regardless of Zoom Basis. Small rooms use backdrop margins when needed. |
 | **AREA FRAMING** | **SCENE** includes the whole authored map. **TERRAIN** crops around terrain connected to your entry point. |
 | **CROP PADDING** | Adds **0-4 map tiles** around a terrain crop. |
+| **CONNECTED MAPS** | **ON** shows directly connected scenery in Full mode's margins. It does not change framing or apply to Bounded mode. **OFF** by default. |
 | **WORLD RESOLUTION** | **RETRO** keeps the original pixelated look. **SCREEN** keeps more detail when zooming out. |
 | **VOID BACKDROP** | **BLACK** leaves black margins. **GAME** follows the game's own Void Fill selection. |
-| **AREA TRANSITION** | **NONE**, **FADE**, **H-SCROLL** or **V-SCROLL**. |
+| **AREA TRANSITION** | **NONE**, **FADE** or **SLIDE**. Slide direction follows the map connection automatically. |
 | **TRANSITION MS** | Transition duration, **50-2000 milliseconds**. Higher means slower. |
-| **SCROLL DIRECTION** | Normal or reversed direction for scroll transitions. |
 | **UNTESTED ENGINE** | **OFF** by default. **TRY** allows attempting an untested stable engine version in the supported range. |
 
 **Tilt and the underlying Void Fill choice are game settings**, not extra
@@ -132,20 +141,40 @@ For a closer moving view, try **BOUNDED**, **ZOOM BASIS: NORMAL** and
 **WORLD RESOLUTION: SCREEN**, then adjust zoom to taste. For a stationary
 whole-area view, choose **FULL**.
 
+If interiors look too large, try **MAX ZOOM: 100%**. **OFF** preserves the old
+strict map-only framing. The cap also overrides a higher Bounded Zoom setting.
+
+Older H-scroll and V-scroll preferences now use Slide; the old reverse-animation
+setting is ignored. Changes without a reliable connection direction switch
+immediately rather than sliding in an arbitrary direction. Door fades remain
+game-controlled.
+
 ### Help for each option
 
 Highlight a setting and press your configured **Select** button.
 Use the direction buttons to turn pages, then **B** or **Select** to close.
 Opening help does not change the setting. Help also covers **Reset Defaults**.
 
+### Preview without leaving options
+
+In Static Camera's **in-game** options, press **Start** to open the preview.
+It redraws the scene using your current settings while keeping gameplay paused.
+Press **B** to return to the same setting and menu position.
+
+Preview is available for Full and Bounded cameras after entering a map, not
+from the launcher's settings or during protected scenes. It preserves the
+camera's aspect ratio inside the menu display; Screen Resolution sharpness is
+only approximate in this lower-resolution preview.
+
 ## Known limitations
 
 - **Bounded + Tilt can let the player leave the visible screen at either bottom
   corner.** This is an existing consequence of keeping the tilted camera strictly
   inside the area's boundaries. That behavior is intentionally unchanged.
-- **Small or narrow areas enforce a minimum zoom.** A low percentage remains
+- **With MAX ZOOM off, small or narrow areas enforce a minimum zoom.** A low percentage remains
   selectable, but the camera may need a closer view to avoid showing outside
-  the area. Full mode uses its own automatic fit.
+  the area. Enabling MAX ZOOM permits backdrop margins instead. Full mode uses
+  its own automatic fit.
 - **A whole area and the screen may have different shapes.** Full mode keeps
   the area visible and centered; leftover space uses the selected backdrop.
   Void Fill is decoration, not additional playable terrain.
@@ -157,6 +186,10 @@ Opening help does not change the setting. Help also covers **Reset Defaults**.
   stays black.
 - **Special cameras and cutscenes use the original renderer.** Door and scripted
   fades remain game-controlled rather than playing an extra mod transition.
+- **Battle animations temporarily use native pixel resolution.** The camera
+  framing stays put, but SCREEN can look more pixelated while the original battle
+  effect runs. Exceptional effects explicitly drawn over UI retain the engine's
+  protected presentation.
 - **SCREEN uses more graphics memory.** Unsupported or memory-limited cases can
   fall back to RETRO. Engine mirrored/capture previews remain low-resolution.
 - Other camera-replacement mods are not supported together. Full playthroughs,

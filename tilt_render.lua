@@ -38,12 +38,13 @@ end
 
 -- Ground is assembled at integer 1:1 world pixels by the adapter. Only the
 -- completed texture is filtered/projected, never individual packed atlas UVs.
-function R.ground(Renderer, raster, frame, captureX, captureY, captureW, captureH)
+function R.ground(Renderer, raster, frame, captureX, captureY, captureW, captureH, coverage)
   local vertices = {}
-  local b = frame.ground
+  local b = coverage or frame.ground
   local x, y = math.max(captureX, b.x), math.max(captureY, b.y)
   local r, bottom = math.min(captureX + captureW, b.x + b.w),
     math.min(captureY + captureH, b.y + b.h)
+  if r <= x or bottom <= y then return end
   for i, p in ipairs({ { x, y }, { r, y }, { r, bottom }, { x, bottom } }) do
     local sx, sy, q = frame.point(p[1], p[2])
     vertices[i] = { sx, sy, (p[1] - captureX) / captureW, (p[2] - captureY) / captureH, q }

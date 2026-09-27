@@ -53,6 +53,34 @@ for _, base in ipairs({ 1, 3, 6 }) do
   end
 end
 
+for _, base in ipairs({ 1, 3 }) do
+  for _, b in ipairs({ { x = 32, y = 48, w = 32, h = 32 },
+    { x = 16, y = 32, w = 32, h = 640 }, { x = 16, y = 32, w = 640, h = 32 },
+    { x = 0, y = 0, w = 640, h = 480 } }) do
+    for _, cap in ipairs({ 0.05, 0.5, 1, 2 }) do
+      for _, pos in ipairs({ -1000, 1000 }) do
+        local f = G.project(b, 240 * base, 160 * base, pos, pos, "partial", 2, base, base * cap)
+        T.check(f.scale <= base * cap, "Bounded maximum overrides boundary and requested zoom")
+        T.check(f.x >= b.x and f.y >= b.y and f.x + f.w <= b.x + b.w + 1e-7
+          and f.y + f.h <= b.y + b.h + 1e-7, "capped raster stays within authored bounds")
+        if b.w * f.scale < 240 * base then
+          T.eq(f.x, b.x, "undersized horizontal axis uses the whole room")
+          T.eq(f.dx, (240 * base - b.w * f.scale) / 2, "room gets centered horizontal backdrop")
+        end
+        if b.h * f.scale < 160 * base then
+          T.eq(f.y, b.y, "undersized vertical axis uses the whole room")
+          T.eq(f.dy, (160 * base - b.h * f.scale) / 2, "room gets centered vertical backdrop")
+        end
+      end
+      T.same(G.project(b, 240, 160, 0, 0, "full", 2, base, base * cap),
+        G.project(b, 240, 160, 0, 0, "full", 2, base), "maximum zoom does not affect Full")
+    end
+  end
+end
+T.raises(function()
+  G.project({ x = 0, y = 0, w = 32, h = 32 }, 240, 160, 0, 0, "partial", 1, 1, 0)
+end, "maximum scale", "invalid cap is diagnosed")
+
 local function room(x, y, d)
   local tx, ty = x + d[1], y + d[2]
   if tx >= 2 and tx <= 5 and ty >= 3 and ty <= 6 then return tx, ty end
@@ -65,15 +93,15 @@ T.same(G.reachable(3, 1, 0, 0, 0, function(x, y, d)
   if d[3] == "right" and x == 0 then return 2, 0 end
 end), { x = 0, y = 0, w = 48, h = 16 }, "directed ledge graph")
 
-for _, kind in ipairs({ "fade", "horizontal", "vertical" }) do
-  for _, reverse in ipairs({ false, true }) do
-    local a, b = G.mix(kind, 0, 240, 160, reverse)
+for _, kind in ipairs({ "fade", "slide" }) do
+  for _, direction in ipairs({ "east", "west", "north", "south" }) do
+    local a, b = G.mix(kind, 0, 240, 160, direction)
     T.eq(a[1] + a[2], 0, "transition starts at old frame")
-    a, b = G.mix(kind, 1, 240, 160, reverse)
+    a, b = G.mix(kind, 1, 240, 160, direction)
     T.eq(b[1] + b[2], 0, "transition ends at new frame")
-    a, b = G.mix(kind, 0.5, 240, 160, reverse)
+    a, b = G.mix(kind, 0.5, 240, 160, direction)
     if kind == "fade" then T.eq(a[3] + b[3], 0, "black midpoint")
-    elseif kind == "horizontal" then T.eq(math.abs(a[1] - b[1]), 240, "horizontal seam")
+    elseif direction == "east" or direction == "west" then T.eq(math.abs(a[1] - b[1]), 240, "horizontal seam")
     else T.eq(math.abs(a[2] - b[2]), 160, "vertical seam") end
   end
 end
@@ -98,6 +126,8 @@ local MR = require("src.mods.Runtime")
 local Map = require("src.core.game3.map")
 local Collision = require("src.core.game3.collision")
 local Tilt = require("src.render.Tilt")
+local nativeBattle = require("src.core.game3.battle_transition")
+local nativeWorldSample = Map.worldMidAt
 local original = F.draw
 local function stub(name, value) package.loaded[name] = value end
 stub("src.ui.game3.shop_menu", { isShopCamera = function() return false end })
@@ -131,6 +161,14 @@ stub("src.core.game3.tileset_native", { ready = function() return true end,
 stub("src.core.game3.tileset_anim", { setVisiblePairs = function() end })
 require("src.import.gba.versions").NATIVE_RENDER = true
 local seen = {}
+local function crossing(game, destination, direction)
+  local source = RT.session.map
+  local def = game.data.maps[source]
+  local previous = def.connections
+  def.connections = { { dir = direction, map = destination, offset = 0 } }
+  MR.emit("map.entered", { mapId = destination, fromMapId = source, via = "connection" })
+  def.connections = previous
+end
 local vanillaRefresh = function() seen.refresh = (seen.refresh or 0) + 1 end
 local vanillaSample = function() return 0, "fixture", false end
 Map.refreshWorld, Map.worldMidAt = vanillaRefresh, vanillaSample
@@ -160,7 +198,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   })
   T.eq(#run.errors, 0, version .. " real loader accepts entry: " .. tostring(run.errors[1]))
   T.check(run.loader.exports.static_camera ~= nil, "entry actually executed")
-  T.eq(#(run.loader.optionSchemas.static_camera or {}), 11, "eleven settings registered")
+  T.eq(#(run.loader.optionSchemas.static_camera or {}), 12, "twelve settings registered")
   local rows, byKey, keys = run.loader.optionSchemas.static_camera, {}, {}
   for _, row in ipairs(rows) do
     byKey[row.key], keys[#keys + 1] = row, row.key
@@ -170,14 +208,16 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
       T.check(#choice[1] <= 8, "choice label fits FRLG menu")
     end
   end
-  T.same(keys, { "mode", "zoom_style", "zoom", "framing", "padding", "resolution",
-    "void_fill", "transition", "duration", "reverse", "experimental" }, "related settings are grouped in order")
+  T.same(keys, { "mode", "zoom_style", "zoom", "max_zoom", "framing", "padding", "connected", "resolution",
+    "void_fill", "transition", "duration", "experimental" }, "related settings are grouped in order")
   T.eq(byKey.resolution.default, "retro", "existing visual style remains the default")
   T.eq(byKey.void_fill.default, "black", "black margins remain the safe default")
   T.eq(byKey.zoom_style.default, "consistent", "consistent zoom is default")
   T.eq(byKey.zoom.min, 5, "5 percent minimum")
   T.eq(byKey.zoom.max, 200, "200 percent maximum")
   T.eq(byKey.zoom.step, 5, "5 percent steps")
+  T.eq(byKey.max_zoom.default, 0, "zoom ceiling is opt-in")
+  T.eq(#byKey.max_zoom.choices, 41, "ceiling offers OFF plus 5-200 percent in 5 percent steps")
   if #run.errors > 0 then error(table.concat(run.errors, "\n")) end
   local settings = { mode = "full", transition = "none", framing = "scene" }
   run.loader.modOptions.static_camera = settings
@@ -324,6 +364,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
       native.image = greenImage
       now = 10
       game:draw()
+      crossing(game, "SECOND", effect == "vertical" and "south" or "east")
       RT.session.map, F._flashMapId, native.image = "SECOND", "SECOND", redImage
       now = 11
       game:draw()
@@ -343,6 +384,8 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
     T = T, game = game, settings = settings, native = native,
     sentinel = sentinel, Field = F, Runtime = MR, def = def, seen = seen, root = root,
     setTime = function(value) now = value end,
+    crossing = crossing,
+    nativeBattle = nativeBattle, worldSample = nativeWorldSample,
   })
 
   -- Force an error inside the wrapped renderer, not a fabricated camera API.
@@ -376,4 +419,4 @@ if not love._staticCameraGpu then
   assert(loadfile(root .. "\\tests\\void_fill_test.lua"))()({ T = T, root = root })
 end
 assert(loadfile(root .. "\\tests\\compatibility_test.lua"))()({ T = T, root = root, def = def, files = files })
-T.finish("Static Camera 0.10.0")
+T.finish("Static Camera")

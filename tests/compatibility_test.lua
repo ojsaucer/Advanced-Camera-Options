@@ -20,6 +20,7 @@ return function(ctx)
     settings, warnings, schema = {}, {}, nil
   end
   local mod = {
+    events = { on = function(_, _, callback) return callback end },
     options = {
       define = function(_, rows)
         schema = rows
@@ -118,11 +119,11 @@ return function(ctx)
       fs = T.sdk.memfs(ctx.files), data = T.sdk.gen3Data(), generation = 3,
     })
     T.eq(#loaded.errors, 0, "real loader admits untested patch to expose opt-in")
-    T.eq(#(loaded.loader.optionSchemas.static_camera or {}), 11, "real untested loader exposes opt-in setting")
+    T.eq(#(loaded.loader.optionSchemas.static_camera or {}), 12, "real untested loader exposes opt-in setting")
     loaded.release()
     reset()
     start()
-    T.eq(#schema, 11, "untested engine still registers all settings")
+    T.eq(#schema, 12, "untested engine still registers all settings")
     T.eq(settings.experimental, false, "experimental option defaults off")
     tick(game)
     T.eq(game.draw, baseDraw, "untested engine has no game wrapper before opt-in")

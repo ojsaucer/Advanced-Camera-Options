@@ -3,6 +3,18 @@
 What's new for players. For implementation and testing details, see the
 [technical reference](docs/TECHNICAL.md).
 
+## 0.11.0
+
+- Added an optional maximum zoom for Bounded mode, keeping small interiors from
+  becoming too enlarged. Extra space uses your chosen backdrop.
+- Added optional connected-map scenery in Full mode without changing its framing.
+- Replaced horizontal/vertical scrolling and reverse direction with one
+  direction-aware Slide transition.
+- Kept camera framing steady during ordinary battle-entry animations. Screen
+  rendering briefly uses native pixel resolution to preserve the game's effects.
+- Added an in-game settings preview: press Start to preview, then B to return
+  without moving the player or losing your menu position.
+
 ## 0.10.1
 
 - Added the GitHub update information needed by the Gen1Recomp launcher.
