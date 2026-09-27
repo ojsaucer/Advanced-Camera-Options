@@ -1,0 +1,26 @@
+name: Package mod
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify runtime ZIP
+        shell: powershell
+        run: .\build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: static-camera-package
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error

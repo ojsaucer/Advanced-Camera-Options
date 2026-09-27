@@ -1,0 +1,17 @@
+dist/
+.github/agents/
+*.agent.md
+baseroms/
+assets/
+*.gba
+*.gb
+*.gbc
+*.love
+*.sav
+*.srm
+*.log
+*.tmp
+.env
+.env.*
+Thumbs.db
+.DS_Store

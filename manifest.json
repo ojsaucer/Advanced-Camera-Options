@@ -1,0 +1,18 @@
+{
+  "id": "static_camera",
+  "name": "Static Camera",
+  "version": "0.8.0",
+  "api": 2,
+  "entry": "main.lua",
+  "profile": "content",
+  "category": "UI",
+  "games": ["firered", "leafgreen"],
+  "game_version": "=0.3.19",
+  "priority": 100,
+  "dependencies": [],
+  "optional_dependencies": [],
+  "conflicts": [],
+  "permissions": ["engine_internals"],
+  "affects_link": false,
+  "description": "Static and bounded Gen 3 cameras with Tilt, optional game Void Fill backdrop, Select-help, 5-200% zoom, Retro/screen rendering and area transitions. Audited for 0.3.19."
+}

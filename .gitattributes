@@ -1,0 +1,2 @@
+# Keep Windows packaging inputs consistent across Git checkouts.
+* text=auto eol=crlf
