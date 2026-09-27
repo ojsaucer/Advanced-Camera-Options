@@ -6,6 +6,8 @@ return function(ctx)
   local Tilt = require("src.render.Tilt")
   local Field = require("src.core.game3.field_view")
   local Session = require("src.core.game3.runtime")
+  local FieldWeather = require("src.core.game3.field_weather")
+  local Weather = require("src.core.game3.weather")
   local angle, level = Tilt.angle, Tilt.level
   for _, degrees in ipairs({ 15, 35, 50 }) do
     Tilt.angle = math.rad(degrees)
@@ -25,6 +27,8 @@ return function(ctx)
     saved[#saved + 1] = function() t[k] = old end
     t[k] = v
   end
+  replace(FieldWeather, "_current", Weather.NONE)
+  replace(Weather, "_suspended", false)
   local colors = { { 0, 1, 0, 1 }, { 0, 0, 1, 1 }, { 1, 0, 0, 1 },
     { 1, 1, 0, 1 }, { 0, 0, 0, 1 } }
   local native, quads, pixels = { image = {} }, {}, nil
@@ -106,10 +110,12 @@ return function(ctx)
       { "screen", 2, 360, 240 } }) do
       Fill.setMode("water")
       settings.void_fill = "black"
+      FieldWeather.setWeather(Weather.SHADE)
       local base = ctx.capture(unpack(view))
       local captureW, captureH = ctx.seen.w, ctx.seen.h
       color(base, 5, 300, colors[5], "GPU: default margins stay black despite engine Water")
       base:release()
+      FieldWeather.setWeather(Weather.NONE)
       settings.void_fill = "game"
       for mode, mid in pairs({ map = 1, water = 2, trees = 3, black = 4 }) do
         Fill.setMode(mode)
@@ -120,6 +126,27 @@ return function(ctx)
         color(image, 35, 35, colors[3], "GPU: UI remains above the backdrop")
         T.eq(ctx.seen.w, captureW, "backdrop does not expand the camera capture")
         T.eq(ctx.seen.h, captureH, "backdrop does not alter camera framing")
+        image:release()
+        FieldWeather.setWeather(Weather.SHADE)
+        local shaded = { colors[mid + 1][1] * 0.68, colors[mid + 1][2] * 0.68,
+          colors[mid + 1][3] * 0.74 }
+        for _ = 1, 2 do
+          image = ctx.capture(unpack(view))
+          color(image, 5, 300, shaded, "GPU: backdrop receives native shade exactly once")
+          color(image, 200, 300, { 0, 0.68, 0 }, "GPU: terrain is not shaded twice")
+          color(image, 368, 248, colors[5], "GPU: shading preserves authored black")
+          color(image, 35, 35, colors[3], "GPU: weather does not shade UI")
+          image:release()
+        end
+        Weather.suspend()
+        image = ctx.capture(unpack(view))
+        color(image, 5, 300, colors[mid + 1], "GPU: suspended weather leaves backdrop unshaded")
+        color(image, 200, 300, colors[1], "GPU: suspended weather leaves terrain unshaded")
+        image:release()
+        Weather.resume()
+        FieldWeather.setWeather(Weather.NONE)
+        image = ctx.capture(unpack(view))
+        color(image, 5, 300, colors[mid + 1], "GPU: removing shade restores raw backdrop")
         image:release()
       end
       Fill.setMode("water")
@@ -135,8 +162,38 @@ return function(ctx)
         color(tilted, p[1], p[2], colors[4], "GPU: unused Tilt corners receive decorative fill")
       end
       tilted:release()
+      FieldWeather.setWeather(Weather.SHADE)
+      for _, degrees in ipairs({ 15, 35, 50 }) do
+        Tilt.angle = math.rad(degrees)
+        tilted = ctx.capture(unpack(view))
+        color(tilted, 719, 479, { 0.68, 0.68, 0 },
+          "GPU: native backdrop shade survives Tilt projection")
+        color(tilted, 35, 35, colors[3], "GPU: tilted shade leaves UI unchanged")
+        tilted:release()
+      end
+      FieldWeather.setWeather(Weather.NONE)
       Tilt.angle, Tilt.level = 0, 0
+      settings.mode = "partial"
+      FieldWeather.setWeather(Weather.SHADE)
+      local bounded = ctx.capture(unpack(view))
+      color(bounded, 5, 300, { 0, 0.68, 0 }, "GPU: bounded terrain receives shade only once")
+      bounded:release()
+      FieldWeather.setWeather(Weather.NONE)
+      settings.mode = "full"
     end
+    local weatherDraw, repeatCalls = FieldWeather.draw, 0
+    replace(FieldWeather, "draw", function(x, y, w, h)
+      if w == 16 and h == 16 then repeatCalls = repeatCalls + 1 end
+      return weatherDraw(x, y, w, h)
+    end)
+    for _, mode in ipairs({ Weather.FOG_HORIZONTAL, Weather.RAIN, Weather.RAIN_THUNDERSTORM,
+      Weather.DOWNPOUR, Weather.NONE }) do
+      FieldWeather.setWeather(mode)
+      ctx.capture("screen", 1, 720, 480):release()
+    end
+    T.eq(repeatCalls, 0, "spatial weather is never tiled onto backdrop texture")
+    FieldWeather.draw = weatherDraw
+    FieldWeather.setWeather(Weather.NONE)
     local checker = {}
     for k, v in pairs(layout) do checker[k] = v end
     checker.borderWidth, checker.borderHeight = 2, 2
@@ -220,13 +277,15 @@ return function(ctx)
       nextDef.midLayout = nextLayout
       replace(scene.data.maps, "SECOND", nextDef)
       ctx.setTime(30)
+      FieldWeather.setWeather(Weather.SHADE)
       ctx.capture("screen", 1, 720, 480):release()
       Session.session.map, Field._flashMapId = "SECOND", "SECOND"
+      FieldWeather.setWeather(Weather.NONE)
       ctx.setTime(31)
       ctx.capture("screen", 1, 720, 480):release()
       ctx.setTime(31.5)
       local halfway = ctx.capture("screen", 1, 720, 480)
-      color(halfway, 100, 0, colors[2], "GPU: outgoing backdrop survives area transition")
+      color(halfway, 100, 0, { 0, 0, 0.74 }, "GPU: outgoing backdrop retains its captured shade")
       color(halfway, 620, 0, colors[4], "GPU: incoming area uses its own backdrop during scroll")
       halfway:release()
       Session.session.map, Field._flashMapId = "FIXTURE", "FIXTURE"

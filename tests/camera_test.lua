@@ -4,7 +4,7 @@ package.path = package.path .. ";./?.lua;./?/init.lua"
 local T = require("tests.modkit")
 local files = {}
 for _, name in ipairs({ "manifest.json", "main.lua", "geometry.lua", "adapter_gen3.lua",
-  "settings_help.lua", "tilt_geometry.lua", "tilt_render.lua", "void_backdrop.lua" }) do
+  "settings_help.lua", "tilt_geometry.lua", "tilt_render.lua", "void_backdrop.lua", "compatibility.lua" }) do
   local file = assert(io.open(root .. "\\" .. name, "rb"))
   files["mods/static_camera/" .. name] = file:read("*a")
   file:close()
@@ -112,7 +112,8 @@ stub("src.core.game3.field_effects", {})
 stub("src.core.game3.doors", {})
 stub("src.core.game3.pokecenter_heal", {})
 stub("src.core.game3.ss_anne_cutscene", {})
-stub("src.core.game3.field_weather", {})
+local FieldWeather = require("src.core.game3.field_weather")
+FieldWeather._assets = {}
 stub("src.core.game3.ow_sprites", { ready = function() return false end })
 stub("src.core.game3.objects", { hasMap = function() return false end })
 local atlas
@@ -123,6 +124,7 @@ end
 local native = { image = lg.newImage(atlas or "synthetic") }
 local quad = lg.newQuad(0, 0, 16, 16, 16, 16)
 stub("src.core.game3.tileset_native", { ready = function() return true end,
+  hasMid = function() return true end,
   get = function() return native end, slotFor = function() return 0 end,
   quad = function() return native.testQuad or quad end,
   overQuad = function() return native.testOverQuad end })
@@ -158,7 +160,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   })
   T.eq(#run.errors, 0, version .. " real loader accepts entry: " .. tostring(run.errors[1]))
   T.check(run.loader.exports.static_camera ~= nil, "entry actually executed")
-  T.eq(#(run.loader.optionSchemas.static_camera or {}), 10, "ten settings registered")
+  T.eq(#(run.loader.optionSchemas.static_camera or {}), 11, "eleven settings registered")
   local rows, byKey, keys = run.loader.optionSchemas.static_camera, {}, {}
   for _, row in ipairs(rows) do
     byKey[row.key], keys[#keys + 1] = row, row.key
@@ -169,7 +171,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
     end
   end
   T.same(keys, { "mode", "zoom_style", "zoom", "framing", "padding", "resolution",
-    "void_fill", "transition", "duration", "reverse" }, "related settings are grouped in order")
+    "void_fill", "transition", "duration", "reverse", "experimental" }, "related settings are grouped in order")
   T.eq(byKey.resolution.default, "retro", "existing visual style remains the default")
   T.eq(byKey.void_fill.default, "black", "black margins remain the safe default")
   T.eq(byKey.zoom_style.default, "consistent", "consistent zoom is default")
@@ -195,6 +197,9 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   MR.call("core.update", function(g, dt) g:update(dt) end, game, 1 / 60)
   local tiltActive = Tilt.active
   local sentinel = lg.newCanvas(240, 160)
+  local savedCells, savedPool = F._nativeCellsByPair, F._nativeCellPool
+  local cells, pool = { fixture = { "vanilla" } }, { { marker = "vanilla" } }
+  F._nativeCellsByPair, F._nativeCellPool = cells, pool
   lg.setCanvas(sentinel)
   local x, y, z = game:draw()
   T.eq(x, "draw", "return value")
@@ -211,6 +216,11 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   T.eq(Tilt.active, tiltActive, "tilt preference restored")
   T.eq(lg.getCanvas(), sentinel, "render target restored")
   T.eq(depth, 0, "graphics stack balanced")
+  T.eq(F._nativeCellsByPair, cells, "native cell lists restored after mod render")
+  T.eq(F._nativeCellPool, pool, "native cell pool restored after mod render")
+  T.eq(cells.fixture[1], "vanilla", "vanilla cell list contents untouched")
+  T.eq(pool[1].marker, "vanilla", "vanilla pool contents untouched")
+  F._nativeCellsByPair, F._nativeCellPool = savedCells, savedPool
   if love._staticCameraGpu then
     lg.setCanvas()
     local pixels = sentinel:newImageData()
@@ -365,4 +375,5 @@ if not love._staticCameraGpu then
   assert(loadfile(root .. "\\tests\\tilt_test.lua"))()({ T = T, root = root })
   assert(loadfile(root .. "\\tests\\void_fill_test.lua"))()({ T = T, root = root })
 end
-T.finish("Static Camera 0.8.0")
+assert(loadfile(root .. "\\tests\\compatibility_test.lua"))()({ T = T, root = root, def = def, files = files })
+T.finish("Static Camera 0.10.0")

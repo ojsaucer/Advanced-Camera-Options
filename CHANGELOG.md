@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.10.0]
+
+### Changed
+- FULL/BOUNDED Tilt sprites now scale by the perspective factor at their feet,
+  preserving upright proportions, foot anchoring and sprite-local transforms.
+  Applies to player/NPC billboards and supported actor-effect callbacks.
+- Full fitting accounts for depth-scaled sprite envelopes. AREA FIT zoom uses
+  the updated fit; strict Bounded clamps are not relaxed.
+- Scoped billboard handoff validation and restoration prevent graphics hooks
+  leaking into terrain, UI, later actors or later frames.
+
+### Documented
+- The player can leave the visible screen near either bottom corner in strict
+  Bounded Tilt. The requested behavior is preserved, not fixed or relaxed.
+- This release also publishes the compatibility and shade improvements from
+  the previously local 0.9.0 and 0.9.1 builds.
+
+### Validation
+- 6421/6421 headless assertions passed on each tested engine.
+- GPU: 12992/12992 assertions on 0.3.19; 13004/13004 on 0.3.22.
+- Near/far NPC pixel sizes, foot anchors, Full/Bounded, both resolutions and
+  HiDPI, actor-local transforms and billboard failure cleanup are covered.
+- Tests use actual engine modules with synthetic assets. Imported-map gameplay
+  and actual-device performance still need testing.
+
+## [0.9.1]
+
+### Fixed
+- GAME Void Fill now receives the engine's uniform forest-shade tint before
+  projection, matching the map without double-tinting terrain or affecting UI.
+- Repaint and shade once per frame so dimming does not accumulate. Weather
+  suspension and shade removal follow native behavior; transitions retain the
+  outgoing area's captured tint.
+- Shade capability is optional and independent of the camera/backdrop checks.
+  Spatial fog, rain and local effects are not tiled onto the repeat texture.
+
+### Validation
+- Reproduced 54 failing shade GPU checks before applying the fix.
+- 6420/6420 headless assertions on each tested engine; GPU totals:
+  12648/12648 on 0.3.19 and 12660/12660 on 0.3.22.
+
+## [0.9.0]
+
+### Added
+- Central compatibility policy and capability checks instead of three separate
+  exact-version restrictions. Regression-tested engines: 0.3.19 and 0.3.22.
+- UNTESTED ENGINE: OFF by default, TRY for explicit experimental opt-in on other
+  stable 0.3.x engines from 0.3.19. Live opt-out restores normal behavior.
+- Independent fallbacks for unavailable SCREEN, Tilt projection, terrain crop,
+  Void Fill and settings-help capabilities, with diagnostic warnings.
+- Policy, loader, missing-module/method, optional-fallback and lifecycle tests.
+
+### Fixed
+- Isolate 0.3.22 native cell-list/pool scratch state alongside camera tile caches.
+- Keep the original draw path, including normal Tilt, on subsequent frames
+  after a camera fault. The original error still propagates after cleanup.
+- Clear detached attachment tracking so opt-in can reattach after draw-time opt-out.
+
+### Validation
+- 6417/6417 headless assertions passed separately on 0.3.19 and 0.3.22.
+- Real LOVE graphics: 12337/12337 passed on 0.3.19; 12349/12349 on 0.3.22,
+  including new collected-effect callback projection checks.
+- Untested-version simulation validates policy only. Actual-device gameplay
+  and performance on imported maps still require testing.
+
 ## [0.8.0]
 
 ### Fixed

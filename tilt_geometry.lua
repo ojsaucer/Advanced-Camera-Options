@@ -41,10 +41,10 @@ function T.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, Tilt, env
     for _, p in ipairs(corners) do
       local x, y, q = point(p[1], p[2], cx, cy, scale)
       if q <= 0 then return nil end
-      l, t, r, b = math.min(l, x), math.min(t, y), math.max(r, x), math.max(b, y)
+      l, t = math.min(l, x - envelope.left * scale * q), math.min(t, y - envelope.top * scale * q)
+      r, b = math.max(r, x + envelope.right * scale * q), math.max(b, y + envelope.bottom * scale * q)
     end
-    return l - envelope.left * scale, t - envelope.top * scale,
-      r + envelope.right * scale, b + envelope.bottom * scale
+    return l, t, r, b
   end
   local lo, hi = 0, math.min(vw / bounds.w, vh / bounds.h)
   for _ = 1, 52 do

@@ -1,6 +1,6 @@
 local B = {}
 
-function B.new(warn)
+function B.new(warn, shade)
   local Fill = require("src.core.game3.void_fill")
   local Native = require("src.core.game3.tileset_native")
   local lg = love.graphics
@@ -82,6 +82,11 @@ function B.new(warn)
     for _, cell in ipairs(desc.cells) do
       if cell.under then lg.draw(desc.native.image, cell.under, cell.x, cell.y) end
       if cell.over then lg.draw(desc.native.overImage, cell.over, cell.x, cell.y) end
+    end
+    if shade then
+      lg.push("all")
+      shade(desc.w, desc.h)
+      lg.pop()
     end
     lg.setCanvas(target)
     lg.setBlendMode("alpha", "premultiplied")

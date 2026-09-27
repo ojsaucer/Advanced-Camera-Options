@@ -54,18 +54,37 @@ end
 
 function R.actors(Tilt, Field, frame, captureX, captureY, draw)
   local lg = love.graphics
-  local original, billboard = Tilt.groundPoint, Field._billboard
-  -- Gen3 pushBillboard only translates projected feet: sprite pixel sizes
-  -- stay constant with depth, matching the engine's upright pass exactly.
-  Tilt.groundPoint = function(x, y)
+  local original, billboard, translate = Tilt.groundPoint, Field._billboard, lg.translate
+  local pending
+  local function project(x, y)
+    assert(not pending, "Unsupported Tilt billboard: previous foot transform was not consumed")
     local sx, sy, q = frame.point(x + captureX, y + captureY)
-    if q <= 0 then return -1e9, -1e9, q end
-    return sx / frame.scale, sy / frame.scale, q
+    if not (q > 0 and q < math.huge) then sx, sy, q = -1e9, -1e9, 1 end
+    sx, sy = sx / frame.scale, sy / frame.scale
+    pending = { x = x, y = y, dx = sx - x, dy = sy - y, q = q, depth = lg.getStackDepth() }
+    return sx, sy, q
   end
+  local function billboardTranslate(x, y)
+    if not pending then return translate(x, y) end
+    local p = pending
+    pending = nil
+    -- Audited FieldView projects feet, pushes, then translates. Consume only
+    -- that handoff; later sprite-local transforms remain untouched.
+    assert(lg.getStackDepth() == p.depth + 1 and x == p.dx and y == p.dy,
+      "Unsupported Tilt billboard transform order")
+    translate(x, y)
+    translate(p.x, p.y)
+    lg.scale(p.q, p.q)
+    translate(-p.x, -p.y)
+  end
+  Tilt.groundPoint, lg.translate = project, billboardTranslate
   lg.scale(frame.scale, frame.scale)
   local ok, err = pcall(draw)
-  Tilt.groundPoint, Field._billboard = original, billboard
+  if Tilt.groundPoint == project then Tilt.groundPoint = original end
+  if lg.translate == billboardTranslate then lg.translate = translate end
+  Field._billboard = billboard
   if not ok then error(err, 0) end
+  assert(not pending, "Unsupported Tilt billboard: missing foot transform")
 end
 
 return R

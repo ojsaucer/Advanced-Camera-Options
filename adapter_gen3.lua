@@ -8,23 +8,35 @@ local function result(r)
   return unpack(r, 2, r.n)
 end
 
-function Adapter.start(mod, G, tiltModules, Backdrop)
-  local Version = require("src.core.Version")
-  assert(Version.engine == "0.3.19" and Version.modApi == 2,
-    "Static Camera requires the audited 0.3.19 payload; this adapter needs review for newer builds.")
+function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
+  if not compatibility.check("camera") then return end
+  local capabilities = {}
+  for _, feature in ipairs({ "screen", "tilt", "terrain", "backdrop", "shade" }) do
+    capabilities[feature] = compatibility.check(feature)
+  end
   local Runtime = require("src.mods.Runtime")
   local GameVersion = require("src.core.GameVersion")
   local Field = require("src.core.game3.field_view")
   local Player = require("src.core.game3.player")
   local Session = require("src.core.game3.runtime")
   local Map = require("src.core.game3.map")
-  local Collision = require("src.core.game3.collision")
+  local Collision = compatibility.modules["src.core.game3.collision"]
   local Tilt = require("src.render.Tilt")
   local Renderer = require("src.render.Renderer")
-  local Zoom = require("src.render.Zoom")
+  local Zoom = compatibility.modules["src.render.Zoom"]
   local Warp = require("src.core.game3.warp")
   local Fade = require("src.ui.game3.fade")
   local lg = love.graphics
+  local shade
+  if capabilities.shade then
+    local FieldWeather = compatibility.modules["src.core.game3.field_weather"]
+    local Weather = compatibility.modules["src.core.game3.weather"]
+    shade = function(w, h)
+      -- Only uniform shade can be replayed on a repeat tile. Spatial weather
+      -- and effects must retain their original coordinates and side effects.
+      if FieldWeather.getWeather() == Weather.SHADE then FieldWeather.draw(0, 0, w, h) end
+    end
+  end
   local function tiltModule(name)
     local text, err = mod:read(name .. ".lua")
     assert(text, err)
@@ -37,13 +49,6 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
     end
     return tiltModules.render.available(Renderer)
   end
-  assert(type(Field.draw) == "function" and type(Field.flashSpansFor) == "function"
-    and type(Map.worldMidAt) == "function" and type(Collision.ledgeLanding) == "function"
-    and type(lg.getStackDepth) == "function" and type(Renderer.frameRects) == "function"
-    and type(Renderer.setWorldOverride) == "function" and type(Renderer.fitScale) == "function"
-    and type(Zoom.scale) == "function" and type(Warp.isBusy) == "function"
-    and type(Fade.isActive) == "function", "Unsupported Gen 3 renderer capabilities")
-
   local attachment, update
   local warnings = {}
   local function warn(key, message)
@@ -86,7 +91,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
   end
   local cacheKeys = { "_nativeBatches", "_nativeOverBatches", "_nativeOverByRow",
     "_nativeBx", "_nativeBy", "_nativePair", "_nativeOverPair", "_nativeVoid",
-    "_nativeDirty", "_nativeOverOx", "_nativeOverOy" }
+    "_nativeDirty", "_nativeOverOx", "_nativeOverOy", "_nativeCellsByPair", "_nativeCellPool" }
 
   local function bind(game)
     local oldDraw, oldReset = game.draw, game.reset
@@ -98,7 +103,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
     local envelopeKey, envelope
     local cache, cacheKey, cropKey, crop = {}, nil, nil, nil
     local published, failedScreenKey
-    local backdrop = Backdrop.new(warn)
+    local backdrop = capabilities.backdrop and Backdrop.new(warn, shade)
     local backdropPixels = 0
 
     local function clearCache()
@@ -125,7 +130,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
     end
     local function clear()
       clearCanvases()
-      backdrop.dispose()
+      if backdrop then backdrop.dispose() end
       backdropPixels = 0
       release(raster)
       raster, rw, rh = nil, nil, nil
@@ -139,6 +144,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
       if game.draw == draw then game.draw = rawDraw end
       if game.reset == reset then game.reset = rawReset end
       clear()
+      if attachment and attachment.game == game then attachment = nil end
     end
     local function active(name, method)
       local m = require(name)
@@ -165,7 +171,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
       local key = tostring(id) .. ":" .. tostring(layout) .. ":" .. framing .. ":" .. padding
       if cropKey == key then return crop end
       crop = { x = 0, y = 0, w = layout.width * 16, h = layout.height * 16 }
-      if framing == "reachable" then
+      if framing == "reachable" and capabilities.terrain then
         if Collision._mapId ~= id or not Collision._grid then
           warn("collision", "Reachable crop unavailable until collision is ready; using full scene.")
           return crop
@@ -217,6 +223,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
       if choice("resolution", "retro", { retro = true, screen = true }) ~= "screen" then
         return w, h, false
       end
+      if not capabilities.screen then return w, h, false end
       -- A larger intermediate alone would be downsampled by worldCanvas.
       -- Only publish a native image when the real world compositor owns this pass.
       if not Renderer.worldActive or lg.getCanvas() ~= Renderer.worldCanvas
@@ -274,7 +281,12 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
       end
 
       local renderW, renderH, screen = targetSize(w, h)
-      local tilted = tiltRequested
+      local tilted = tiltRequested and capabilities.tilt
+      if tilted and (not G.finite(Tilt.angle) or Tilt.angle < 0
+        or Tilt.angle > math.rad(50) + 1e-8 or not G.finite(Tilt.FOCAL) or Tilt.FOCAL <= 0) then
+        warn("tilt-projection", "Unsupported Tilt angle/focal distance; using a flat camera.")
+        tilted = false
+      end
       if tilted then
         local ok, available = pcall(tiltSupport)
         if not ok or not available then
@@ -300,8 +312,10 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
       local framing = choice("framing", "scene", { scene = true, reachable = true })
       local fill = choice("void_fill", "black", { black = true, game = true })
       local border
-      if fill == "game" then border = backdrop.resolve(layout, def.pair or layout.pair)
-      else backdrop.dispose() end
+      if backdrop then
+        if fill == "game" then border = backdrop.resolve(layout, def.pair or layout.pair)
+        else backdrop.dispose() end
+      end
       backdropPixels = border and border.w * border.h or 0
       local bounds = boundsFor(id, def, framing, math.floor(number("padding", 1, 0, 4)))
       -- A crop never hides the player after a same-map teleport or terrain change.
@@ -432,7 +446,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
           lg.setBlendMode("alpha", "premultiplied")
           lg.clear(0, 0, 0, 1)
           lg.setColor(1, 1, 1, 1)
-          backdrop.draw(border, frame, renderW, renderH, tiltModules.render, Renderer)
+          if backdrop then backdrop.draw(border, frame, renderW, renderH, tiltModules.render, Renderer) end
           tiltModules.render.ground(Renderer, raster, frame, captureX, captureY, captureW, captureH)
           lg.setCanvas(upright)
           lg.clear(0, 0, 0, 0)
@@ -471,7 +485,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
         lg.setBlendMode("alpha", "premultiplied")
         lg.clear(0, 0, 0, 1)
         lg.setColor(1, 1, 1, 1)
-        backdrop.draw(border, frame, renderW, renderH)
+        if backdrop then backdrop.draw(border, frame, renderW, renderH) end
         lg.setScissor(frame.dx, frame.dy, frame.w * frame.scale, frame.h * frame.scale)
         lg.draw(raster, frame.dx + (captureX - frame.x) * frame.scale,
           frame.dy + (captureY - frame.y) * frame.scale, 0, frame.scale, frame.scale)
@@ -541,8 +555,11 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
     end
 
     draw = function(self, ...)
-      if detached or not alive() then detach(); return oldDraw(self, ...) end
-      if choice("mode", "normal", { full = true, partial = true, normal = true }) == "normal" then
+      if detached or not alive() or not compatibility.allowed() then
+        detach()
+        return oldDraw(self, ...)
+      end
+      if fault or choice("mode", "normal", { full = true, partial = true, normal = true }) == "normal" then
         clear()
         return oldDraw(self, ...)
       end
@@ -578,18 +595,20 @@ function Adapter.start(mod, G, tiltModules, Backdrop)
   update = function(nextUpdate, game, dt)
     local r = pack(nextUpdate(game, dt))
     local version = GameVersion.get()
-    if (version ~= "firered" and version ~= "leafgreen") or not game then dispose()
+    if not compatibility.allowed() or (version ~= "firered" and version ~= "leafgreen") or not game then dispose()
     elseif not attachment or attachment.game ~= game then
       dispose()
-      assert(type(game.draw) == "function" and type(game.reset) == "function",
-        "Unsupported game lifecycle for Static Camera")
-      attachment = bind(game)
+      if type(game.draw) == "function" and type(game.reset) == "function" then
+        attachment = bind(game)
+      else warn("lifecycle", "Unsupported Static Camera game lifecycle; retaining normal camera.") end
     end
     return unpack(r, 1, r.n)
   end
   mod.hooks:wrap("core.update", update)
   mod.hooks:wrap("core.quit_to_launcher", function(nextQuit) dispose(); return nextQuit() end)
-  mod.log:info("Gen 3 internal camera adapter active for audited engine 0.3.19.")
+  if compatibility.allowed() then
+    mod.log:info("Gen 3 camera capability checks passed for engine %s.", compatibility.engine)
+  end
 end
 
 return Adapter

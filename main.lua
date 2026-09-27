@@ -64,6 +64,14 @@ return function(mod)
         .. "H-SCROLL, or from below for V-SCROLL. REVERSE uses the opposite side. "
         .. "Direction is chosen here, not from the player's movement or door orientation. "
         .. "This setting does not affect FADE or NONE." },
+    { key = "experimental", label = "UNTESTED ENGINE", type = "choice", default = false,
+      choices = { { "OFF", false }, { "TRY", true } },
+      help = "OFF keeps the normal camera on untested engine versions. TRY opts into "
+        .. "experimental camera and help adapters on stable 0.3.x engines newer than 0.3.19. "
+        .. "Only 0.3.19 and 0.3.22 have passed the regression suite. Capability checks cannot "
+        .. "prove unchanged rendering behavior. Turn OFF if problems occur. Tested versions "
+        .. "ignore this switch; use CAMERA MODE > NORMAL to disable their camera. "
+        .. "Changing this switch applies on the next update; missing features require a restart after repair." },
   }
   mod.options:define(rows)
   local function module(path)
@@ -72,10 +80,11 @@ return function(mod)
     return assert(loadstring(text, "@static_camera/" .. path))()
   end
   local geometry = module("geometry.lua")
+  local compatibility = module("compatibility.lua").new(mod)
   local adapter = module("adapter_gen3.lua")
   adapter.start(mod, geometry, {
     geometry = module("tilt_geometry.lua"),
     render = module("tilt_render.lua"),
-  }, module("void_backdrop.lua"))
-  module("settings_help.lua").start(mod, rows)
+  }, module("void_backdrop.lua"), compatibility)
+  module("settings_help.lua").start(mod, rows, compatibility)
 end

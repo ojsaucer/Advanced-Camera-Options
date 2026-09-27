@@ -6,17 +6,18 @@ view, with selectable full-scene or reachable-terrain framing.
 The in-game mod name and saved-settings ID remain **Static Camera** and
 `static_camera`, so upgrades preserve existing options.
 
-## Version 0.8.0: perspective-correct Void Fill
+## Version 0.10.0: distance-scaled Tilt sprites
 
-Targets **FireRed and LeafGreen on Gen1Recomp 0.3.19, mod API 2**.
+Targets **FireRed and LeafGreen on Gen1Recomp mod API 2**.
 The mod uses the explicitly authorized `engine_internals` permission. It does
 not require the nonexistent upstream `camera.field` hook and does not edit
 engine files, player coordinates, collision, saves, or another mod.
 
-This is a version-sensitive renderer adapter, not a stable public API. The
-manifest and adapter reject unknown engine versions until their renderer has
-been audited. Gen 1/2 are planned, not implemented. Ruby/Sapphire/Emerald are
-not supported.
+This is a version-sensitive renderer adapter, not a stable public API.
+**0.3.19 and 0.3.22** are regression-tested. Other stable **0.3.x versions
+from 0.3.19 onward** can be tried with an explicit experimental opt-in, subject
+to capability checks. Gen 1/2 are planned, not implemented.
+Ruby/Sapphire/Emerald are not supported.
 
 **Replace the old 0.1.0 prototype; do not use its ZIP.** The new ordinary ZIP
 is a candidate for in-game testing, not a Python-modkit-certified `.modpkg`.
@@ -24,8 +25,8 @@ is a candidate for in-game testing, not a Python-modkit-certified `.modpkg`.
 ## Install
 
 1. Close all running game instances.
-2. Download the [v0.8.0 testing ZIP](https://github.com/ojsaucer/Advanced-Camera-Options/releases/download/v0.8.0/static_camera-0.8.0.zip)
-   and extract it into the game's
+2. Download the [v0.10.0 runtime ZIP](https://github.com/ojsaucer/Advanced-Camera-Options/releases/download/v0.10.0/static_camera-0.10.0.zip)
+   or build it with `.\build.ps1` (see Build below), then extract it into the game's
    `mods\static_camera` directory, replacing the previous version's files.
    `manifest.json` must be directly inside `static_camera`, not a nested folder.
 3. Enable **Static Camera** for FireRed or LeafGreen. The mod declares
@@ -40,7 +41,38 @@ Typical Windows location (use your game's user-data directory on other devices):
 ```
 
 Builds do not automatically install or modify an existing mod. Download the
-release ZIP, not GitHub's source-code archive, for installation.
+runtime ZIP, not GitHub's source-code archive, for installation.
+
+## Engine compatibility
+
+- **Tested:** 0.3.19 and 0.3.22 activate normally after capability checks.
+  This does not claim that intermediate releases or every gameplay scene were tested.
+- **Untested stable 0.3.x patches, at least 0.3.19:** options remain available,
+  but the camera and internal help adapter stay inactive by default. Set
+  **UNTESTED ENGINE -> TRY** using the normal options menu to opt in.
+  Turn it OFF to restore normal behavior on the next update. On tested engines,
+  this setting has no effect; use CAMERA MODE -> NORMAL instead.
+- **Outside that family, prereleases/dev builds, or another mod API major:**
+  the adapter refuses activation even with TRY enabled. The manifest may block
+  loading before options are registered.
+- `compatibility.lua` is the single runtime policy and capability checklist.
+  It checks required module loads, methods and data shapes before installing
+  adapters. Missing core requirements leave the normal camera active.
+- Optional capability failures are independent: SCREEN uses RETRO, Tilt uses a
+  flat camera, TERRAIN uses SCENE, GAME backdrop uses black, and incompatible
+  Select-help is not installed. Warnings name the unavailable feature and
+  missing capability. Restart after repairing/updating those capabilities.
+  Fallbacks do not rewrite saved preferences.
+- Native backdrop shade is checked separately. If that API is unavailable,
+  the backdrop stays untinted with a warning; camera and other features remain available.
+- An unexpected draw failure still restores scoped engine/graphics state,
+  logs and propagates the error; it is not hidden or retried midway through a
+  frame. A faulted camera uses the original draw path on subsequent frames.
+
+**TRY is not a compatibility guarantee.** Function presence cannot verify draw
+ordering, coordinate conventions, cache ownership or projection semantics.
+The adapter still needs review when internals change; a supported upstream
+camera API would be the long-term way to remove those dependencies.
 
 ## Settings
 
@@ -56,11 +88,12 @@ release ZIP, not GitHub's source-code archive, for installation.
 | Area transition | NONE, FADE, H-SCROLL, V-SCROLL | FADE |
 | Transition ms | 50-2000 ms, in 50 ms steps | 350 ms |
 | Scroll direction | NORMAL, REVERSE | NORMAL |
+| Untested engine | OFF, TRY | OFF |
 
 Settings are read live. The engine owns saving them. Area framing is
 independent of camera mode, so either framing choice works with Full or Partial.
 The menu groups camera and zoom first, area framing next, rendering quality
-after that, then transitions. Labels fit the engine's 18-character label and
+after that, then transitions and experimental compatibility. Labels fit the engine's 18-character label and
 8-character value limits rather than being silently truncated.
 
 ### Select-help
@@ -75,8 +108,8 @@ A `Select:HELP` hint appears below this mod's option rows.
 - **Reset Defaults** has help too; opening its help does not reset anything.
 
 Use your configured Select binding (by default, keyboard Tab or Shift).
-The panel is implemented by a mod-scoped internal adapter because engine 0.3.19
-has no native per-option help field. It does not add help to other mods' settings
+The panel is implemented by a mod-scoped internal adapter because the tested engines
+have no native per-option help field. It does not add help to other mods' settings
 or alter their shared manager class.
 
 ### World resolution
@@ -136,6 +169,13 @@ preserves the previous appearance.
   the horizon. A half-pixel guard below the horizon avoids invalid projection.
 - The pattern follows live Extras changes and atlas animation/recolouring.
   Outgoing/incoming transitions retain each area's own backdrop; UI stays above it.
+- The engine's uniform **forest shade** also applies to GAME fill, once per
+  fresh border image, before flat or Tilt projection. It follows weather
+  suspension/resumption; leaving a shaded area restores the original colors.
+  Terrain is not tinted twice, and dialogue/UI stay unchanged.
+- Global compositor fades/veils still cover the finished view. Spatial fog,
+  rain, cave Flash masks and local field effects are not replayed onto the
+  repeating texture: those need distinct coordinate and compositing treatment.
 - Borders are assembled at integer 1:1 tile coordinates before repetition to
   avoid packed-atlas seams. The small repeat texture counts toward the camera
   buffer budget; an optional backdrop allocation failure logs a warning and
@@ -185,7 +225,8 @@ engine camera scale, independent of map size:
   when the area is large enough. Values down to **5%** are selectable in **5%**
   steps. Higher percentages zoom in; lower percentages zoom out.
 - Moving between differently sized areas keeps the same apparent character/tile
-  size, provided each area can contain that viewport.
+  scale, provided each area can contain that viewport. With Tilt, a sprite's
+  distance from the camera also changes its apparent size.
 - Small or narrow areas automatically increase zoom only as much as necessary
   to keep both axes inside the selected bounds. That safety rule takes priority
   over constant size, including when using Reachable-Area Crop.
@@ -275,13 +316,27 @@ characters, rather than tilting a flattened screenshot.
   conservative fallback.
 - **BOUNDED:** the camera clamps the inverse-projected viewport footprint to
   the area. Tilt can require a higher minimum zoom, especially in narrow areas.
+- **Known BOUNDED + Tilt limitation:** the player can move partially or entirely
+  offscreen near the two bottom corners. The strict clamp contains the wider,
+  far edge of the tilted footprint, which can exclude the area's lower corners
+  at its narrower, near edge. This behavior is intentionally unchanged: the
+  camera does not move beyond the strict bounds or add a player-safe margin.
+  Use FULL, turn Tilt off, or reduce its angle if this obstructs play. Lowering
+  zoom alone is not a guaranteed fix because the boundary minimum still applies.
 - Works with both resolution modes, framing choices and camera transitions.
   Dialogue and menus stay at their normal size.
 - Changing Tilt angle, mode or zoom discards a transition's old projection so
   the next view does not mix incompatible camera images.
 - The ground uses the engine's perspective shader and its normal linear ground
-  filtering. Flat rendering keeps nearest filtering; sprites remain upright
-  at the camera scale instead of being flattened or depth-scaled with the floor.
+  filtering. Flat rendering keeps nearest filtering. In FULL and BOUNDED with
+  Tilt, sprites remain upright but now scale in both axes by the ground's
+  perspective factor at their feet: farther sprites are smaller, nearer ones
+  larger. Their projected feet and sprite-local animation transforms stay
+  anchored. Player, NPC and supported actor-effect callbacks share this path.
+- FULL fitting includes these depth-scaled sprite envelopes, so its framing
+  can differ slightly from earlier releases. AREA FIT zoom uses that updated
+  reference fit; strict BOUNDED clamping is not relaxed. NORMAL and protected
+  presentations retain the engine's original sprite rendering.
 - If the audited shader/mesh is unavailable, the mod logs a warning and retains
   a flat camera. Saved Tilt preferences are not changed.
 - Tilt adds an upright image buffer. The mod targets a **128 MiB canvas budget**;
@@ -312,8 +367,13 @@ not been certified together.
 - `tilt_geometry.lua` fits the projected area and clamps inverse-projected
   viewport bounds. `tilt_render.lua` reuses the installed engine's perspective
   shader/mesh and projects actor feet in a separate upright pass.
+  Its scoped billboard adapter checks the native project/push/translate
+  sequence and scales around each foot only within that actor's matrix push.
+  Projection and graphics-translation hooks are restored even on errors.
 - `adapter_gen3.lua` owns the version-specific renderer integration. It wraps a
   game instance through the existing `core.update` hook, not a fork-only hook.
+- `compatibility.lua` centralizes engine policy and independent capability
+  checks. The 0.3.22 native cell lists/pool are isolated alongside tile batches.
 - `settings_help.lua` adds scoped Select handling to the active FRLG manager
   instance and a mod-owned, paginated help layer. Closing/recreating the manager,
   resetting the game, quitting or disabling the mod cleans up its owned hooks
@@ -343,8 +403,9 @@ Upstream references:
 - [Development documentation](https://github.com/bryanthaboi/gen1recomp/tree/dev/docs)
 - [Official modding wiki](https://github.com/bryanthaboi/gen1recomp/wiki)
 - [Audited source revision](https://github.com/bryanthaboi/gen1recomp/tree/e7ce2a3a7195dc4f5f7d6177cddc736afcd0ff66)
+- [0.3.22 source revision](https://github.com/bryanthaboi/gen1recomp/tree/5540fc1538c7c9c8a3c8c85e09679ae03f28beaf)
 
-Validation used source modules extracted from the installed **0.3.19** update,
+Validation used source modules extracted from the installed **0.3.19 and 0.3.22** updates,
 not the older executable's 0.2.58 payload or the modified local development
 fork. Future supported hooks can replace the adapter while retaining geometry,
 settings and acceptance tests.
@@ -372,9 +433,10 @@ on pushes to `main`, version tags, or a manual workflow run. This is a
 
 ## Validation
 
-- **6192/6192 headless assertions passed** with the installed LuaJIT library,
-  installed 0.3.19 modules and the upstream `tests.modkit` harness.
-- **12112/12112 assertions passed under real LÖVE 11.5 graphics**, including fitted
+- **6421/6421 headless assertions passed on each tested engine** with the installed LuaJIT library,
+  each tested engine's modules and the upstream `tests.modkit` harness.
+- **12992/12992 graphics assertions passed on 0.3.19 and 13004/13004 on 0.3.22
+  under real LÖVE 11.5**, including fitted
   terrain pixels, black margins, Partial's filled viewport, the black fade
   midpoint, and distinct outgoing/incoming images in both scroll axes.
 - The actual final `Renderer:endFrame()` compositor was tested at normal and
@@ -404,6 +466,10 @@ on pushes to `main`, version tags, or a manual workflow run. This is a
   and feet, normal/2x DPI, both resolutions, angle changes and transitions.
   The audited mirrored-override path is simulated on the GPU; this is not a
   claim of testing an actual iOS device.
+- Near/far NPC pixel measurements cover Full/Bounded, Retro/SCREEN, 1x/2x DPI
+  and 0/15/35/50-degree projections. Matrix checks cover foot anchoring, both
+  size axes, sprite-local transforms and rejected/failed billboard cleanup.
+  The existing strict-boundary tests remain, including the documented corner limitation.
 - Small-room fitting, large-actor envelopes, grow-only sprite clearance,
   shared-mesh error cleanup and SCREEN-to-RETRO resource fallback are covered.
 - Void backdrop tests cover engine MAP/TREES/WATER/BLACK selection and fallback,
@@ -424,6 +490,18 @@ installed FieldView, collision and loader modules. They do not establish
 full-playthrough compatibility, imported-map appearance, real actor/effect
 placement, large-map performance, or correct interaction with every cutscene.
 No Python tools or environment were used.
+
+Compatibility regressions also cover opt-in defaults, live opt-out/re-enable,
+real-loader admission of a simulated untested patch, module-load errors, missing
+required methods, independent optional-feature fallbacks and restored cache
+ownership. Simulating a future version tests policy, not that future engine.
+The extra 0.3.22 GPU checks exercise collected field-effect draw callbacks at
+15/35/50 degrees in Full and Bounded cameras for both supported games.
+Shade regressions use the actual engine weather renderer. They cover border
+and terrain colors, repeated frames without cumulative dimming, UI/authored
+black preservation, both resolutions, HiDPI, Tilt, Bounded, weather suspension,
+live weather changes and captured transition colors. The old implementation
+failed 54 new shade checks before the correction.
 
 The user reported working gameplay in earlier releases and supplied a tile-seam
 screenshot. The seam fix and new Tilt implementation still need imported-map
@@ -475,6 +553,9 @@ On **both FireRed and LeafGreen**, using a save with free movement:
     mode outdoors and indoors. Check that fill matches the map's Tilt angle and
     depth at all angles, including tiny-room horizons. Check transitions and
     that actual black map tiles remain unchanged.
+13. On an untested stable 0.3.x engine, confirm OFF keeps the normal camera and
+    TRY enables the experimental adapter only when capabilities pass. Return
+    to OFF and check the original view, Tilt, menus and resource cleanup.
 
 Rendering is capped at 32768 layout metatiles and 8192 pixels per viewport
 axis (or the GPU's lower texture limit for screen-resolution buffers).

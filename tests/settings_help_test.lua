@@ -131,7 +131,8 @@ return function(ctx)
     T.eq(Manager.draw, originalDraw, "FRLG module draw remains untouched")
     T.check(layer.mod ~= Manager, "affordance belongs only to live stack entry")
     local expected = { mode = true, zoom_style = true, zoom = true, framing = true,
-      padding = true, resolution = true, void_fill = true, transition = true, duration = true, reverse = true }
+      padding = true, resolution = true, void_fill = true, transition = true, duration = true,
+      reverse = true, experimental = true }
     local byKey = {}
     for _, row in ipairs(schema) do byKey[row.key] = row end
     local stored = game.mods.modOptions.static_camera

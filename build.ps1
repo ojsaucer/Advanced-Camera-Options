@@ -9,7 +9,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $files = @(
     'manifest.json', 'main.lua', 'geometry.lua', 'adapter_gen3.lua',
     'settings_help.lua', 'tilt_geometry.lua', 'tilt_render.lua',
-    'void_backdrop.lua', 'mod.card', 'README.md', 'CHANGELOG.md'
+    'void_backdrop.lua', 'compatibility.lua', 'mod.card', 'README.md', 'CHANGELOG.md'
 )
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.id -cnotmatch '^[a-z0-9_]+$' -or

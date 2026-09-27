@@ -32,9 +32,9 @@ return function(ctx)
       T.eq(full.cx, moved.cx, "Full Tilt horizontal centre remains stationary")
       T.eq(full.cy, moved.cy, "Full Tilt vertical centre remains stationary")
       for _, p in ipairs({ { 0, 0 }, { 640, 0 }, { 640, 480 }, { 0, 480 } }) do
-        local sx, sy = full.point(p[1], p[2])
-        T.check(sx - envelope.left * full.scale >= -1e-7 and sx + envelope.right * full.scale <= vw + 1e-7
-          and sy - envelope.top * full.scale >= -1e-7 and sy + envelope.bottom * full.scale <= vh + 1e-7,
+        local sx, sy, q = full.point(p[1], p[2])
+        T.check(sx - envelope.left * full.scale * q >= -1e-7 and sx + envelope.right * full.scale * q <= vw + 1e-7
+          and sy - envelope.top * full.scale * q >= -1e-7 and sy + envelope.bottom * full.scale * q <= vh + 1e-7,
           "Full projected corner and upright overhang fit")
       end
       Tilt.angle = math.rad(35)
@@ -43,9 +43,9 @@ return function(ctx)
       T.check(room.scale > 1, "small-room Full framing is not crushed by engine capture padding")
       local bigActor = Geometry.project(bounds, 240, 160, 0, 0, "full", 1, nil, Tilt, large)
       for _, p in ipairs({ { 0, 0 }, { 640, 0 }, { 640, 480 }, { 0, 480 } }) do
-        local x, y = bigActor.point(p[1], p[2])
-        T.check(x - large.left * bigActor.scale >= -1e-7 and x + large.right * bigActor.scale <= 240 + 1e-7
-          and y - large.top * bigActor.scale >= -1e-7 and y <= 160 + 1e-7,
+        local x, y, q = bigActor.point(p[1], p[2])
+        T.check(x - large.left * bigActor.scale * q >= -1e-7 and x + large.right * bigActor.scale * q <= 240 + 1e-7
+          and y - large.top * bigActor.scale * q >= -1e-7 and y <= 160 + 1e-7,
           "large measured actor fits stationary area-wide envelope")
       end
       for _, zoom in ipairs({ 0.05, 0.55, 1, 2 }) do
@@ -62,6 +62,10 @@ return function(ctx)
       end
     end
   end
+  Tilt.angle = math.rad(35)
+  local corner = Geometry.project(bounds, 240, 160, 0, 464, "partial", 2, 1, Tilt)
+  local cornerX = corner.point(8, 480)
+  T.check(cornerX < 0, "documented lower-corner clipping is retained by strict Bounded Tilt")
   Tilt.angle, Tilt.level = originalAngle, originalLevel
   if not love._staticCameraGpu or not ctx.capture then return end
 
@@ -82,6 +86,55 @@ return function(ctx)
   ctx.native.image, ctx.native.testQuad = image, quad
   ctx.settings.zoom, ctx.settings.zoom_style = 100, "consistent"
   local savedPoint, savedActive = Tilt.groundPoint, Tilt.active
+  local savedTranslate = lg.translate
+  local priorWorld = ctx.scene.world
+  local far, near = { def = {} }, { def = {} }
+  ctx.scene.world = { npcs = { far, near } }
+  Player.px, Player.py = 320, 240
+  for _, degrees in ipairs({ 0, 15, 35, 50 }) do
+    Tilt.angle, Tilt.level = math.rad(degrees), 1
+    for _, mode in ipairs({ "full", "partial" }) do
+      ctx.settings.mode = mode
+      for _, view in ipairs({ { "screen", 1, 720, 480 }, { "screen", 2, 360, 240 },
+        { "retro", 1, 720, 480 } }) do
+        local retro = view[1] == "retro"
+        local vw, vh, outputScale = retro and 240 or 720, retro and 160 or 480, retro and 3 or 1
+        local f = Geometry.project(bounds, vw, vh, Player.px, Player.py, mode, 1,
+          mode == "partial" and (retro and 1 or require("src.render.Zoom").scale(3)) or nil, Tilt)
+        local depths = { 0.45, 0.85 }
+        for i, npc in ipairs({ far, near }) do
+          local x, y = f.worldAt(vw * 0.65, vh * depths[i])
+          npc.px, npc.py = x - 8, y - 16
+        end
+        local output = ctx.capture(unpack(view))
+        local heights = {}
+        for i, npc in ipairs({ far, near }) do
+          local fx, fy, q = f.point(npc.px + 8, npc.py + 16)
+          fx, fy = fx * outputScale, fy * outputScale
+          local s = f.scale * q * outputScale
+          local top, bottom = 480, -1
+          for y = math.max(0, math.floor(fy - 20 * s - 5)), math.min(479, math.ceil(fy + 5)) do
+            local r, g, b = output:getPixel(math.floor(fx), y)
+            if b > 0.8 and r < 0.4 and g < 0.65 then
+              top, bottom = math.min(top, y), math.max(bottom, y)
+            end
+          end
+          local tolerance = retro and 4 or 2
+          T.check(bottom >= top and math.abs(bottom - top + 1 - 12 * s) <= tolerance,
+            "GPU: NPC height equals camera scale times perspective depth")
+          T.check(math.abs(bottom + 1 - (fy - 2 * s)) <= tolerance,
+            "GPU: distance-scaled NPC keeps its foot anchor")
+          heights[i] = bottom - top + 1
+        end
+        if degrees >= 35 then
+          T.check(heights[2] > heights[1], "GPU: nearer NPC is visibly taller than distant NPC")
+        end
+        T.eq(lg.translate, savedTranslate, "GPU: actor pass restores graphics translation")
+        output:release()
+      end
+    end
+  end
+  ctx.scene.world = priorWorld
   for _, degrees in ipairs({ 15, 35, 50 }) do
     Tilt.angle, Tilt.level = math.rad(degrees), 1
     for _, mode in ipairs({ "full", "partial" }) do
@@ -116,7 +169,7 @@ return function(ctx)
               local Zoom = require("src.render.Zoom")
               local f = Geometry.project(bounds, width, height, p[1], p[2], mode, 1,
                 Zoom.scale(3), Tilt)
-              local fx, fy = f.point(Player.px + 8, Player.py + 16)
+              local fx, fy, q = f.point(Player.px + 8, Player.py + 16)
               local top, bottom = height, -1
               for y = math.max(0, math.floor(fy - 20 * f.scale)), math.min(height - 1, math.ceil(fy)) do
                 local r, g, b = output:getPixel(math.floor(fx), y)
@@ -124,10 +177,10 @@ return function(ctx)
                   top, bottom = math.min(top, y), math.max(bottom, y)
                 end
               end
-              T.check(math.abs(bottom - top + 1 - 12 * f.scale) <= 2,
-                "GPU: upright actor keeps native height instead of flattening onto ground "
+              T.check(math.abs(bottom - top + 1 - 12 * f.scale * q) <= 2,
+                "GPU: upright actor height follows ground perspective "
                   .. string.format("(got=%s expected=%s foot=%.2f,%.2f angle=%s)",
-                    bottom - top + 1, 12 * f.scale, fx, fy, degrees))
+                    bottom - top + 1, 12 * f.scale * q, fx, fy, degrees))
             end
           elseif view[1] == "screen" then
             local f = Geometry.project(bounds, width, height, p[1], p[2], mode, 1, nil, Tilt)
@@ -136,8 +189,8 @@ return function(ctx)
               local r, g = output:getPixel(math.floor(x), math.floor(y))
               T.check(g > 0.6 or r > 0.6, "GPU: Full Tilt retains each projected area corner")
             end
-            local fx, fy = f.point(Player.px + 8, Player.py + 16)
-            local r, g = output:getPixel(math.floor(fx), math.floor(fy - 8 * f.scale))
+            local fx, fy, q = f.point(Player.px + 8, Player.py + 16)
+            local r, g = output:getPixel(math.floor(fx), math.floor(fy - 8 * f.scale * q))
             T.check(r > 0.7 and g < 0.4, "GPU: upright actor anchors to projected feet")
           end
           output:release()
@@ -180,6 +233,45 @@ return function(ctx)
     lg.pop()
     T.eq(Field._billboard, billboard, "upright failure restores field billboard state")
     T.eq(Tilt.groundPoint, savedPoint, "upright failure restores engine projection helper")
+    T.eq(lg.translate, savedTranslate, "upright failure restores graphics translation")
+    local depth = lg.getStackDepth()
+    lg.push("all")
+    lg.origin()
+    render.actors(Tilt, Field, f, 0, 0, function()
+      for _, foot in ipairs({ { 200, 100 }, { 200, 400 } }) do
+        local sx, sy, q = Tilt.groundPoint(foot[1], foot[2])
+        lg.push()
+        lg.translate(sx - foot[1], sy - foot[2])
+        local x, y = lg.transformPoint(foot[1], foot[2])
+        local wantX, wantY = f.point(foot[1], foot[2])
+        T.check(math.abs(x - wantX) + math.abs(y - wantY) < 0.001,
+          "billboard scaling leaves projected feet invariant")
+        local _, top = lg.transformPoint(foot[1], foot[2] - 32)
+        T.check(math.abs(y - top - 32 * f.scale * q) < 0.001,
+          "billboard matrix scales sprite-local height by depth")
+        local right = lg.transformPoint(foot[1] + 16, foot[2])
+        T.check(math.abs(right - x - 16 * f.scale * q) < 0.001,
+          "billboard matrix scales width by the same perspective factor")
+        lg.translate(3, -5)
+        local localX, localY = lg.transformPoint(foot[1], foot[2])
+        T.check(math.abs(localX - x - 3 * f.scale * q)
+          + math.abs(localY - y + 5 * f.scale * q) < 0.001,
+          "sprite-local animation transforms are preserved after the foot handoff")
+        lg.pop()
+      end
+    end)
+    lg.pop()
+    T.eq(lg.getStackDepth(), depth, "per-actor scaling does not leak matrix pushes")
+    lg.push("all")
+    T.raises(function()
+      render.actors(Tilt, Field, f, 0, 0, function()
+        Tilt.groundPoint(200, 100)
+        lg.translate(0, 0)
+      end)
+    end, "transform order", "unknown billboard handoff is rejected rather than distorting sprites")
+    lg.pop()
+    T.eq(lg.translate, savedTranslate, "handoff rejection restores global translation")
+    T.eq(Tilt.groundPoint, savedPoint, "handoff rejection restores projection")
     local draw, mesh = lg.draw, Renderer:tiltMesh()
     local priorTexture = mesh:getTexture()
     local raster = lg.newCanvas(643, 483)
@@ -278,6 +370,33 @@ return function(ctx)
       redPixels:release()
       redImage:release()
     end
+  end
+  if require("src.core.Version").engine == "0.3.22" then
+    local Effects = require("src.core.game3.field_effects")
+    local collect, transition = Effects.collectActors, ctx.settings.transition
+    ctx.settings.transition = "none"
+    Player.px, Player.py = 320, 240
+    local effect = { x = 368, y = 240, kind = "effect", elevation = 3,
+      draw = function(self, camX, camY)
+        lg.setColor(0, 0, 1, 1)
+        lg.rectangle("fill", self.x - camX + 4, self.y - camY + 4, 8, 12)
+      end }
+    Effects.collectActors = function(actors) actors[#actors + 1] = effect end
+    for _, degrees in ipairs({ 15, 35, 50 }) do
+      Tilt.angle, Tilt.level = math.rad(degrees), 1
+      for _, mode in ipairs({ "full", "partial" }) do
+        ctx.settings.mode = mode
+        local output = ctx.capture("screen", 1, 720, 480)
+        local f = Geometry.project(bounds, 720, 480, Player.px, Player.py, mode, 1,
+          mode == "partial" and require("src.render.Zoom").scale(3) or nil, Tilt)
+        local x, y, q = f.point(effect.x + 8, effect.y + 16)
+        local r, g, b = output:getPixel(math.floor(x), math.floor(y - 6 * f.scale * q))
+        T.check(b > 0.8 and r < 0.1 and g < 0.1,
+          "GPU: 0.3.22 collected effect callback remains upright at projected feet")
+        output:release()
+      end
+    end
+    Effects.collectActors, ctx.settings.transition = collect, transition
   end
   ctx.native.image, ctx.native.testQuad = oldImage, oldQuad
   ctx.settings.mode, ctx.settings.zoom, ctx.settings.zoom_style = oldMode, oldZoom, oldStyle

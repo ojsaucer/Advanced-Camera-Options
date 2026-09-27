@@ -1,10 +1,8 @@
 local Help = {}
 local function pack(...) return { n = select("#", ...), ... } end
 
-function Help.start(mod, rows)
-  local Version = require("src.core.Version")
-  assert(Version.engine == "0.3.19" and Version.modApi == 2,
-    "Static Camera settings help requires audited engine 0.3.19/API 2.")
+function Help.start(mod, rows, compatibility)
+  if not compatibility.check("help") then return end
   local Runtime = require("src.mods.Runtime")
   local GameVersion = require("src.core.GameVersion")
   local Manager = require("src.ui.game3.mod_manager")
@@ -214,7 +212,7 @@ function Help.start(mod, rows)
   update = function(nextUpdate, game, dt)
     local r = pack(pcall(nextUpdate, game, dt))
     if not r[1] then dispose(); error(r[2], 0) end
-    if not alive() or not supported() or not game then
+    if not compatibility.allowed() or not alive() or not supported() or not game then
       dispose()
     else
       local m, layer = Manager._mgr, managerLayer()
@@ -222,11 +220,14 @@ function Help.start(mod, rows)
         or attachment.layer ~= layer or not attachment.valid()) then dispose() end
       if Manager.open and Manager._game == game and m and layer and not failed[m] then
         if not attachment then
-          assert(type(m.updateOptions) == "function" and type(game.reset) == "function",
-            "Unsupported Static Camera settings lifecycle")
-          attachment = bind(game, m, layer)
+          if type(m.updateOptions) == "function" and type(game.reset) == "function" then
+            attachment = bind(game, m, layer)
+          else
+            compatibility.warn("help-lifecycle", "Static Camera help unavailable: unsupported settings lifecycle.")
+            failed[m] = true
+          end
         end
-        attachment.refresh()
+        if attachment then attachment.refresh() end
       else
         dispose()
       end
