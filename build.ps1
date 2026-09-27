@@ -9,7 +9,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $files = @(
     'manifest.json', 'main.lua', 'geometry.lua', 'adapter_gen3.lua',
     'settings_help.lua', 'tilt_geometry.lua', 'tilt_render.lua',
-    'void_backdrop.lua', 'compatibility.lua', 'mod.card', 'README.md', 'CHANGELOG.md'
+    'void_backdrop.lua', 'compatibility.lua', 'mod.card', 'README.md', 'CHANGELOG.md',
+    'docs\TECHNICAL.md', 'CONTRIBUTING.md'
 )
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.id -cnotmatch '^[a-z0-9_]+$' -or
@@ -33,7 +34,7 @@ try {
         $zip = [System.IO.Compression.ZipArchive]::new($stream, 'Create', $true)
         try {
             foreach ($name in $files) {
-                $entry = $zip.CreateEntry($name, 'Optimal')
+                $entry = $zip.CreateEntry($name.Replace('\', '/'), 'Optimal')
                 $entry.LastWriteTime = $stamp
                 $inputStream = [System.IO.File]::OpenRead((Join-Path $PSScriptRoot $name))
                 try {
@@ -61,7 +62,7 @@ try {
             throw 'Archive inventory does not match the package allowlist.'
         }
         foreach ($name in $files) {
-            $entry = $zip.GetEntry($name)
+            $entry = $zip.GetEntry($name.Replace('\', '/'))
             if ($null -eq $entry) { throw "Archive is missing $name" }
             $inputStream = [System.IO.File]::OpenRead((Join-Path $PSScriptRoot $name))
             try {

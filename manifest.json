@@ -1,7 +1,8 @@
 {
   "id": "static_camera",
   "name": "Static Camera",
-  "version": "0.10.0",
+  "version": "0.10.1",
+  "github": "ojsaucer/Advanced-Camera-Options",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -14,5 +15,5 @@
   "conflicts": [],
   "permissions": ["engine_internals"],
   "affects_link": false,
-  "description": "Static and bounded Gen 3 cameras with Tilt, Void Fill, Select-help and screen rendering. Tested on 0.3.19/0.3.22; other stable 0.3.x builds require experimental opt-in."
+  "description": "See whole areas at once or follow the player within map boundaries. Includes Tilt, adjustable zoom, clearer zoomed-out views and transitions for FireRed and LeafGreen."
 }
