@@ -4,7 +4,8 @@ package.path = package.path .. ";./?.lua;./?/init.lua"
 local T = require("tests.modkit")
 local files = {}
 for _, name in ipairs({ "manifest.json", "main.lua", "geometry.lua", "adapter_gen3.lua",
-  "settings_help.lua", "tilt_geometry.lua", "tilt_render.lua", "void_backdrop.lua", "compatibility.lua" }) do
+  "settings_help.lua", "tilt_geometry.lua", "tilt_render.lua", "void_backdrop.lua", "boundary_shading.lua",
+  "compatibility.lua" }) do
   local file = assert(io.open(root .. "\\" .. name, "rb"))
   files["mods/static_camera/" .. name] = file:read("*a")
   file:close()
@@ -198,7 +199,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   })
   T.eq(#run.errors, 0, version .. " real loader accepts entry: " .. tostring(run.errors[1]))
   T.check(run.loader.exports.static_camera ~= nil, "entry actually executed")
-  T.eq(#(run.loader.optionSchemas.static_camera or {}), 12, "twelve settings registered")
+  T.eq(#(run.loader.optionSchemas.static_camera or {}), 16, "sixteen settings registered")
   local rows, byKey, keys = run.loader.optionSchemas.static_camera, {}, {}
   for _, row in ipairs(rows) do
     byKey[row.key], keys[#keys + 1] = row, row.key
@@ -208,8 +209,10 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
       T.check(#choice[1] <= 8, "choice label fits FRLG menu")
     end
   end
-  T.same(keys, { "mode", "zoom_style", "zoom", "max_zoom", "framing", "padding", "connected", "resolution",
-    "void_fill", "transition", "duration", "experimental" }, "related settings are grouped in order")
+  T.same(keys, { "mode", "connected", "neighbor_shade", "neighbor_darkness", "neighbor_distance",
+    "zoom_style", "zoom", "max_zoom", "framing", "padding", "resolution",
+    "void_fill", "extrude_depth", "transition", "duration", "experimental" },
+    "Full settings precede Bounded settings, followed by shared settings")
   T.eq(byKey.resolution.default, "retro", "existing visual style remains the default")
   T.eq(byKey.void_fill.default, "black", "black margins remain the safe default")
   T.eq(byKey.zoom_style.default, "consistent", "consistent zoom is default")
@@ -414,9 +417,13 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   lg.setCanvas()
 end
 assert(loadfile(root .. "\\tests\\settings_help_test.lua"))()({ T = T, root = root })
+assert(loadfile(root .. "\\tests\\boundary_shading_test.lua"))()({ T = T, root = root })
 if not love._staticCameraGpu then
   assert(loadfile(root .. "\\tests\\tilt_test.lua"))()({ T = T, root = root })
   assert(loadfile(root .. "\\tests\\void_fill_test.lua"))()({ T = T, root = root })
 end
 assert(loadfile(root .. "\\tests\\compatibility_test.lua"))()({ T = T, root = root, def = def, files = files })
+if love._staticCameraGpu then
+  assert(loadfile(root .. "\\tests\\extrude_test.lua"))()({ root = root })
+end
 T.finish("Static Camera")

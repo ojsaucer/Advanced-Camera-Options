@@ -55,11 +55,13 @@ return function(ctx)
         local Fill = require("src.core.game3.void_fill")
         local oldFill = Fill.mode
         Fill.setMode("map")
-        settings.void_fill = "game"
-        local filled = ctx.capture(resolution, 1, 720, 480)
-        r, g = filled:getPixel(0, 300)
-        T.check(g > 0.8 and r < 0.1, "GPU: capped room honors GAME backdrop with and without Tilt")
-        filled:release()
+        for _, fill in ipairs({ "game", "extrude" }) do
+          settings.void_fill, settings.extrude_depth = fill, 2
+          local filled = ctx.capture(resolution, 1, 720, 480)
+          r, g = filled:getPixel(0, 300)
+          T.check(g > 0.8 and r < 0.1, "GPU: capped room honors " .. fill .. " backdrop with and without Tilt")
+          filled:release()
+        end
         Fill.mode, settings.void_fill = oldFill, "black"
         capped:release(); uncapped:release()
       end
@@ -104,9 +106,86 @@ return function(ctx)
         T.eq(Map._worldRoot, root, "neighbor render does not corrupt cached root")
         T.eq(Map._worldReachW, reachW, "neighbor render does not alter cached horizontal reach")
         T.eq(Map._worldReachH, reachH, "neighbor render does not alter cached vertical reach")
+        settings.neighbor_shade, settings.neighbor_darkness, settings.neighbor_distance = "uniform", 60, 2
+        local uniform = ctx.capture(resolution, 1, 720, 480)
+        settings.neighbor_shade = "gradient"
+        local gradient = ctx.capture(resolution, 1, 720, 480)
+        local low, high, checked, primary = 1, 0, 0, 0
+        local projection = angle > 0 and Geometry.project({ x = 0, y = 0, w = 640, h = 480 },
+          resolution == "retro" and 240 or 720, resolution == "retro" and 160 or 480,
+          Player.px, Player.py, "full", 2, nil, Tilt) or nil
+        for y = 120, 470, 4 do
+          for x = 0, 715, 4 do
+            local ar, ag = after:getPixel(x, y)
+            local br, bg = before:getPixel(x, y)
+            local ur, ug = uniform:getPixel(x, y)
+            local gr, gg = gradient:getPixel(x, y)
+            local wx = x - 40
+            if projection then
+              wx = projection.worldAt((x + 0.5) / (resolution == "retro" and 3 or 1),
+                (y + 0.5) / (resolution == "retro" and 3 or 1))
+            end
+            if ar > 0.99 and ag < 0.01 and br + bg < 0.01 and wx < -3 then
+              T.check(math.abs(ur - 0.4) < 0.02 and ug < 0.01,
+                "GPU: uniform shading darkens only connected terrain")
+              T.check(gr >= 0.38 and gr <= 1.01 and gg < 0.01,
+                "GPU: gradient stays within configured darkness range")
+              low, high, checked = math.min(low, gr), math.max(high, gr), checked + 1
+            elseif br < 0.01 and bg > 0.99 and ag > 0.99 then
+              T.check(ur < 0.01 and ug > 0.99 and gr < 0.01 and gg > 0.99,
+                ("GPU: current area unchanged angle=%s resolution=%s pixel=%s,%s before=%s,%s uniform=%s,%s gradient=%s,%s")
+                  :format(angle, resolution, x, y, ar, ag, ur, ug, gr, gg))
+              primary = primary + 1
+            end
+          end
+        end
+        T.check(checked > 4 and primary > 20, "GPU: shading checks actual neighbor and primary tiles")
+        T.check(high - low > 0.08, "GPU: gradient becomes darker with distance from primary boundary")
+        uniform:release(); gradient:release()
+        settings.neighbor_shade = "off"
+        local published = require("src.render.Renderer").setWorldOverride
+        local publications = 0
+        local Renderer = require("src.render.Renderer")
+        Renderer.setWorldOverride = function(self, image)
+          if image then publications = publications + 1 end
+          return published(self, image)
+        end
+        local allocate = lg.newCanvas
+        lg.newCanvas = function(w, h, ...)
+          if w > 643 and w ~= 720 then error("injected neighbor raster allocation failure") end
+          return allocate(w, h, ...)
+        end
+        -- Force reallocation of the expanded optional raster.
+        settings.connected = false
+        ctx.capture(resolution, 1, 720, 480):release()
+        settings.connected = true
+        local fallback = ctx.capture(resolution, 1, 720, 480)
+        lg.newCanvas, Renderer.setWorldOverride = allocate, published
+        local fr, fg = fallback:getPixel(360, 300)
+        T.check(math.abs(fr - r1) + math.abs(fg - g1) < 0.01,
+          "GPU: optional neighbor allocation failure retains primary camera landmark")
+        if resolution == "screen" then
+          T.check(publications >= 2, "GPU: neighbor failure does not downgrade Screen resolution")
+        end
+        T.eq(ctx.seen.w, 643, "GPU: failed neighbors return to primary raster, not vanilla camera")
+        fallback:release()
+        settings.connected = false
+        ctx.capture(resolution, 1, 720, 480):release()
+        settings.connected = true
         before:release(); after:release()
       end
     end
+    Session.session.map, Field._flashMapId = "NEIGHBOR", "NEIGHBOR"
+    Player.px, Player.py = 16, 32
+    settings.neighbor_shade, settings.neighbor_darkness = "uniform", 100
+    Tilt.angle, Tilt.level = 0, 0
+    local entered = ctx.capture("screen", 1, 720, 480)
+    local enteredRed, enteredGreen = entered:getPixel(360, 300)
+    T.check(enteredRed > 0.99 and enteredGreen < 0.01,
+      "GPU: previously shaded neighbor becomes fully bright upon entering it")
+    entered:release()
+    Session.session.map, Field._flashMapId = "FIXTURE", "FIXTURE"
+    Player.px, Player.py = 80, 80
     settings.connected = false
     Native.get, Map.worldMidAt = oldGet, oldSample
     scene.data.maps = maps

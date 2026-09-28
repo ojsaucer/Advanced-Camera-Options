@@ -106,6 +106,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
     local cache, cacheKey, cropKey, crop = {}, nil, nil, nil
     local published, failedScreenKey
     local presentation = {}
+    presentation.shading = tiltModule("boundary_shading").new(warn)
     local backdrop = capabilities.backdrop and Backdrop.new(warn, shade)
     local backdropPixels = 0
 
@@ -141,6 +142,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       cropKey, crop, failedScreenKey = nil, nil, nil
       envelopeKey, envelope = nil, nil
       clearCache()
+      presentation.shading.dispose()
+      presentation.neighborFailure = nil
     end
     local function detach()
       if detached then return end
@@ -316,13 +319,16 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         return nextDraw(g, w, h, opts)
       end
       local framing = choice("framing", "scene", { scene = true, reachable = true })
-      local fill = choice("void_fill", "black", { black = true, game = true })
+      local fill = choice("void_fill", "black", { black = true, game = true, extrude = true })
       local border
       if backdrop then
         if fill == "game" then border = backdrop.resolve(layout, def.pair or layout.pair)
+        elseif fill == "extrude" then
+          border = backdrop.resolve(layout, def.pair or layout.pair, "extrude",
+            math.floor(number("extrude_depth", 1, 1, 16)))
         else backdrop.dispose() end
       end
-      backdropPixels = border and border.w * border.h or 0
+      backdropPixels = border and (border.pixels or border.w * border.h) or 0
       local bounds = boundsFor(id, def, framing, math.floor(number("padding", 1, 0, 4)))
       -- A crop never hides the player after a same-map teleport or terrain change.
       -- Expand only; ordinary walking cannot shrink/recenter a Full Static scene.
@@ -337,6 +343,11 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       local limit = number("max_zoom", 0, 0, 200)
       local maxScale = limit > 0 and normalScale * math.max(5, math.floor(limit / 5 + 0.5) * 5) / 100 or nil
       local connected = mode == "full" and mod.options:get("connected") == true and capabilities.connections
+      local neighborKey = tostring(id) .. ":" .. tostring(layout) .. ":" .. renderW .. ":" .. renderH
+      if not connected then presentation.neighborFailure = nil end
+      if presentation.neighborFailure == neighborKey then connected = false end
+      local neighborShade = connected and choice("neighbor_shade", "off",
+        { off = true, uniform = true, gradient = true }) or "off"
       local referenceScale
       if mode == "partial" and choice("zoom_style", "consistent",
         { consistent = true, relative = true }) == "consistent" then
@@ -346,7 +357,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       end
       local signature = table.concat({ mode, framing, number("padding", 1, 0, 4),
         tilted and Tilt.angle or "flat", referenceScale or "relative", zoomLevel(), fill,
-        maxScale or "uncapped", tostring(connected) }, ":")
+        maxScale or "uncapped", fill == "extrude" and number("extrude_depth", 1, 1, 16) or 0 }, ":")
       if projectionKey ~= signature then
         valid, area, motion, presentation.crossing = nil, nil, nil, nil
       end
@@ -450,6 +461,12 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         end
       end)
       if not rasterOK then
+        if connected then
+          presentation.neighborFailure = neighborKey
+          warn("neighbor-raster", "Connected scenery exceeds available resources; omitting neighbors "
+            .. "without changing the current camera: " .. tostring(rasterError))
+          return field(nextDraw, g, w, h, opts)
+        end
         if screen then
           failedScreenKey = renderW .. ":" .. renderH
           warn("screen-raster", "Screen camera buffers exceed available resources; keeping the camera in Retro: "
@@ -501,7 +518,11 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         lg.clear(0, 0, 0, 1)
         lg.setColor(1, 1, 1, 1)
         raster:setFilter("nearest", "nearest")
-        nextDraw(g, captureW, captureH, tilted and { skipActors = true } or opts)
+        presentation.shading.draw(Field, captureX, captureY, layout.width * 16, layout.height * 16,
+          neighborShade, number("neighbor_darkness", 60, 0, 100) / 100,
+          number("neighbor_distance", 8, 1, 32) * 16, function()
+            nextDraw(g, captureW, captureH, tilted and { skipActors = true } or opts)
+          end)
         if tilted then
           lg.setCanvas(live)
           lg.origin()
@@ -518,7 +539,11 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
           lg.clear(0, 0, 0, 0)
           lg.setBlendMode("alpha", "alphamultiply")
           tiltModules.render.actors(Tilt, Field, frame, captureX, captureY, function()
-            nextDraw(g, captureW, captureH, { actorsOnly = true, billboard = true })
+            presentation.shading.draw(Field, captureX, captureY, layout.width * 16, layout.height * 16,
+              neighborShade, number("neighbor_darkness", 60, 0, 100) / 100,
+              number("neighbor_distance", 8, 1, 32) * 16, function()
+                nextDraw(g, captureW, captureH, { actorsOnly = true, billboard = true })
+              end)
           end)
           lg.origin()
           lg.setCanvas(live)

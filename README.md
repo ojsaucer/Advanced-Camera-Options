@@ -27,7 +27,10 @@ scrolling past map edges, or the game's normal camera.
 - **Clearer zoomed-out views:** optional Screen Resolution preserves more detail
   without making dialogue or menus larger.
 - **Matching backgrounds:** optionally use the game's Void Fill choice around
-  the area, following Tilt and forest shade.
+  the area, following Tilt and forest shade, or choose **Extrude** to repeat
+  strips of the map's own boundary tiles.
+- **Clear map boundaries:** darken connected-map terrain uniformly or gradually
+  with distance, without dimming your current map or characters.
 - **Area transitions:** choose fade, a slide toward the connected area you enter,
   or no added transition.
 - **Smoother battle entry:** keep the current camera framing while the game's
@@ -116,33 +119,53 @@ This is an engine installer issue, not something the mod can fix before it loads
 
 ## Settings
 
-The options are grouped as camera/zoom, framing, appearance, transitions, then
-compatibility. Most changes take effect immediately.
+The options start with camera mode, then **Full-specific**, **Bounded-specific**,
+and **shared** settings. Mode-specific options stay visible for configuration
+but only affect their named camera mode. Most changes take effect immediately.
 
 | Setting | What it does |
 | --- | --- |
 | **CAMERA MODE** | **FULL** shows the whole area; **BOUNDED** follows within its edges; **NORMAL** restores the game's camera. |
-| **ZOOM BASIS** | **NORMAL** keeps zoom consistent between areas. **AREA FIT** bases it on the whole-area view instead. |
+| **FULL: CONNECTIONS** | **ON** shows directly connected scenery in Full mode's margins without changing framing. **OFF** by default. |
+| **FULL: MAP SHADE** | **OFF**, **UNIFORM**, or **GRADIENT**. Darkens neighboring terrain only, when connections are on. |
+| **SHADE STRENGTH %** | **0-100%** darkness; default **60%**. Higher makes neighboring terrain darker. |
+| **SHADE DISTANCE** | **1-32 tiles**; default **8**. Distance from the active map's edge where a gradient reaches full strength. |
+| **BOUNDED: BASIS** | **NORMAL** keeps zoom consistent between areas. **AREA FIT** bases it on the whole-area view instead. |
 | **BOUNDED ZOOM %** | **5-200%**, in **5% steps**. Higher means closer. Only affects Bounded mode. |
 | **MAX ZOOM** | **OFF**, or **5-200%** in 5% steps. Caps Bounded zoom at a percentage of normal engine scale, regardless of Zoom Basis. Small rooms use backdrop margins when needed. |
 | **AREA FRAMING** | **SCENE** includes the whole authored map. **TERRAIN** crops around terrain connected to your entry point. |
 | **CROP PADDING** | Adds **0-4 map tiles** around a terrain crop. |
-| **CONNECTED MAPS** | **ON** shows directly connected scenery in Full mode's margins. It does not change framing or apply to Bounded mode. **OFF** by default. |
 | **WORLD RESOLUTION** | **RETRO** keeps the original pixelated look. **SCREEN** keeps more detail when zooming out. |
-| **VOID BACKDROP** | **BLACK** leaves black margins. **GAME** follows the game's own Void Fill selection. |
+| **VOID BACKDROP** | **BLACK** leaves black margins. **GAME** follows the game's Void Fill selection. **EXTRUDE** repeats strips from inside the map's edges. |
+| **EXTRUDE DEPTH** | **1-16 tiles**, default **1**. How many inward rows to copy and repeat outward, limited by the map's size. |
 | **AREA TRANSITION** | **NONE**, **FADE** or **SLIDE**. Slide direction follows the map connection automatically. |
 | **TRANSITION MS** | Transition duration, **50-2000 milliseconds**. Higher means slower. |
 | **UNTESTED ENGINE** | **OFF** by default. **TRY** allows attempting an untested stable engine version in the supported range. |
 
-**Tilt and the underlying Void Fill choice are game settings**, not extra
-sliders added by this mod.
+**Tilt and the GAME backdrop's underlying Void Fill choice are game settings.**
+EXTRUDE uses the map's own tiles independently of that game setting.
 
-For a closer moving view, try **BOUNDED**, **ZOOM BASIS: NORMAL** and
+For a closer moving view, try **BOUNDED**, **BOUNDED: BASIS: NORMAL** and
 **WORLD RESOLUTION: SCREEN**, then adjust zoom to taste. For a stationary
 whole-area view, choose **FULL**.
 
 If interiors look too large, try **MAX ZOOM: 100%**. **OFF** preserves the old
 strict map-only framing. The cap also overrides a higher Bounded Zoom setting.
+
+### Extruded edges and map boundaries
+
+Choose **VOID BACKDROP: EXTRUDE**, then set **EXTRUDE DEPTH**. At depth 1, each
+boundary tile repeats straight outward. At depth 3, the outermost tile repeats
+first, followed by the next two tiles inward, then the strip repeats again.
+Corners repeat the corresponding corner patch. Tiles keep their orientation.
+This is decorative, not walkable terrain, and works best on maps with suitable
+edge scenery. The source is the authored map edge, not the Terrain crop.
+
+For visible map boundaries, enable **FULL: CONNECTIONS** and choose
+**FULL: MAP SHADE**. Uniform shading provides a clear brightness change;
+Gradient starts clear at your map's boundary and darkens into neighboring maps.
+The effect follows Tilt, leaves characters and menus unchanged, and moves to
+the new map's boundary when you cross. It does not darken the decorative backdrop.
 
 Older H-scroll and V-scroll preferences now use Slide; the old reverse-animation
 setting is ignored. Changes without a reliable connection direction switch
@@ -192,6 +215,8 @@ only approximate in this lower-resolution preview.
   protected presentation.
 - **SCREEN uses more graphics memory.** Unsupported or memory-limited cases can
   fall back to RETRO. Engine mirrored/capture previews remain low-resolution.
+  Optional connected scenery is omitted if its larger image cannot fit, rather
+  than changing the primary camera or downgrading its resolution.
 - Other camera-replacement mods are not supported together. Full playthroughs,
   every map/effect and every device have not been certified.
 

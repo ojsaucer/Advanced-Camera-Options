@@ -3,6 +3,17 @@
 What's new for players. For implementation and testing details, see the
 [technical reference](docs/TECHNICAL.md).
 
+## 0.12.0
+
+- Added EXTRUDE backgrounds that repeat the map's individual edge tiles, with
+  adjustable strip depth from 1 to 16 tiles.
+- Added optional uniform or gradient darkening for connected-map terrain,
+  with adjustable strength and fade distance. Your current map stays unchanged.
+- Grouped Full-specific options together, followed by Bounded-specific options
+  and shared camera settings.
+- Prevented optional connected scenery from changing camera resolution or
+  falling back to the vanilla camera when its larger image cannot be allocated.
+
 ## 0.11.0
 
 - Added an optional maximum zoom for Bounded mode, keeping small interiors from

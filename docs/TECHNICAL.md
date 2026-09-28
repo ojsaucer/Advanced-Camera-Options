@@ -210,3 +210,47 @@ unchanged battle framing and callbacks, and the actual preview renderer.
 Imported battle chrome/assets and every gameplay scene still need in-game testing.
 Run `tests/preview_test.lua` separately with the same headless harness paths;
 the camera suite includes the graphics feature tests when run under LÖVE.
+
+## Boundary presentation
+
+Full-specific controls precede Bounded-specific controls, followed by shared
+framing, appearance, transitions and compatibility. Existing option keys remain
+unchanged; no unsupported menu-group schema fields are introduced.
+
+`boundary_shading.lua` temporarily wraps only draws of the field renderer's native
+under/over terrain batches. Its world-coordinate shader excludes the primary
+map rectangle and does not intercept actor or UI images. Uniform shading applies
+the chosen opacity; gradient shading uses Euclidean distance from the primary
+rectangle, reaching that opacity at the configured distance. A one-world-pixel
+guard outside the primary edge prevents dark texels bleeding onto primary terrain
+when the assembled tilted raster is linearly filtered. Hooks and shader state are
+restored after errors. Unsupported shaders leave original colors with a warning.
+
+Connected scenery does not participate in projection fitting or its invalidation
+signature. If allocating the enlarged optional raster fails, the adapter retries
+the primary-only raster at the same output resolution and projection. The failure
+is remembered for that map/layout/output size; toggling connections off and on
+allows a retry. It does not set the camera fault or Screen-fallback latch.
+
+EXTRUDE uses eight reusable edge-strip/corner canvases rather than a huge
+outside-map raster. Sampled tile indices run from the boundary inward and repeat;
+pixel orientation inside each tile is unchanged. Strip depths clamp independently
+to authored width/height. Integer atlas assembly, live repainting and uniform
+weather shade happen before region-specific flat or perspective projection.
+Only the eight outside regions are drawn; actual primary/neighbor terrain retains
+precedence. `desc.pixels` accounts for the complete set of strip allocations.
+Above-horizon space remains black.
+
+Validation on both actual engine module sets with synthetic fixtures:
+
+| Engine | Headless camera | Preview UI | Real LÖVE camera |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 7,740 | 149 | 122,135 |
+| 0.3.22 | 7,740 | 149 | 122,147 |
+
+Separate extrusion checks pass 1,175 CPU and 58,330 real LÖVE assertions per
+engine. Coverage includes repeated strips and corners at multiple depths,
+flat and tilted projection, adapter-selected EXTRUDE in capped rooms,
+neighbor-only uniform/gradient shading, brightness after entering a neighbor,
+and unchanged primary framing when optional neighbor allocation fails.
+These fixtures do not replace gameplay checks with imported game assets.

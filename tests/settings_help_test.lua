@@ -132,7 +132,8 @@ return function(ctx)
     T.check(layer.mod ~= Manager, "affordance belongs only to live stack entry")
     local expected = { mode = true, zoom_style = true, zoom = true, max_zoom = true, framing = true,
       padding = true, connected = true, resolution = true, void_fill = true, transition = true,
-      duration = true, experimental = true }
+      duration = true, experimental = true, neighbor_shade = true, neighbor_darkness = true,
+      neighbor_distance = true, extrude_depth = true }
     local byKey = {}
     for _, row in ipairs(schema) do byKey[row.key] = row end
     local stored = game.mods.modOptions.static_camera
@@ -245,7 +246,7 @@ return function(ctx)
         T.eq(writes, before, "all help navigation leaves saved settings untouched")
       end
     end
-    T.eq(next(expected), nil, "all twelve current setting keys were exercised")
+    T.eq(next(expected), nil, "all sixteen current setting keys were exercised")
     m.cursor, m.scroll = 1, 0
     press("right")
     T.check(writes > 0, "stock option editing still works outside help")
