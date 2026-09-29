@@ -87,7 +87,50 @@ return function(ctx)
   backdrop.dispose()
 
   if ctx.capture then
+    local source = native.image
+    local stripes = love.image.newImageData(80, 16)
+    stripes:mapPixel(function(x)
+      local value = x % 2
+      return value, value, value, 1
+    end)
+    native.image = lg.newImage(stripes)
+    native.image:setFilter("nearest", "nearest")
+    Fill.setMode("map")
+    local target = lg.newCanvas(32, 32)
+    lg.push("all")
+    lg.origin()
+    for _, mode in ipairs({ "game", "extrude" }) do
+      local desc = backdrop.resolve(layout, "general__fixture", mode, 1)
+      for _, filter in ipairs({ "crisp", "smooth", "retro" }) do
+        for _, scale in ipairs({ 0.25, 0.5, 1, 2 }) do
+          lg.setCanvas(target)
+          lg.clear(0, 0, 0, 1)
+          backdrop.draw(desc, { x = -64, y = -64, dx = 0, dy = 0,
+            scale = scale, screenFilter = filter ~= "retro" and filter or nil }, 32, 32)
+          lg.setCanvas()
+          local image = target:newImageData()
+          local r, g, b = image:getPixel(2, 2)
+          if filter == "smooth" and scale < 1 then
+            T.check(math.abs(r - 0.5) < 0.02 and math.abs(g - r) + math.abs(b - r) < 0.02,
+              "GPU: SMOOTH averages minified one-pixel stripes in " .. mode .. " backdrop")
+          else
+            T.check(r < 0.01 or r > 0.99,
+              "GPU: crisp/Retro and enlarged backdrop pixels retain hard edges")
+          end
+          image:release()
+        end
+      end
+    end
+    backdrop.dispose()
+    lg.pop()
+    target:release()
+    native.image:release()
+    stripes:release()
+    native.image = source
     local settings, scene = ctx.settings, ctx.scene
+    for _, key in ipairs({ "connected", "neighbor_shade", "neighbor_darkness", "neighbor_distance", "extrude_depth" }) do
+      replace(settings, key, settings[key])
+    end
     local original = scene.data.maps.FIXTURE
     local def = {}
     for k, v in pairs(original) do def[k] = v end
@@ -293,6 +336,155 @@ return function(ctx)
       settings.transition = "none"
       Tilt.angle, Tilt.level = 0, 0
     end
+    -- Probe background shading without connected maps at known world distances.
+    do
+      -- Height-fitting gives scale 1 and a 328-pixel margin on either side.
+      local narrow = {}
+      for k, v in pairs(layout) do narrow[k] = v end
+      narrow.width, narrow.height = 4, 30
+      function narrow:midAt(x, y)
+        if x < 0 or y < 0 or x >= self.width or y >= self.height then return 1 end
+        return 0
+      end
+      def.midLayout = narrow
+      Fill.setMode("map")
+      settings.connected, settings.neighbor_darkness, settings.neighbor_distance = false, 60, 8
+      local darkness, distance = 0.6, 128 -- 8 tiles * 16 world px
+      local dx = 328
+      for _, fill in ipairs({ "game", "extrude" }) do
+        settings.void_fill, settings.extrude_depth = fill, 2
+        local base = fill == "game" and colors[2] or colors[1]
+        for _, shadeMode in ipairs({ "off", "uniform", "gradient" }) do
+          settings.neighbor_shade = shadeMode
+          local image = ctx.capture("screen", 1, 720, 480)
+          local checked = 0
+          for _, k in ipairs({ 0, 2, 4, 8, 16 }) do
+            local sx = dx - (k * 16 + 8)
+            if sx >= 0 and sx < 720 then
+              local r, g, b = image:getPixel(sx, 300)
+              local gap = k * 16 + 7.5
+              local tint = 1 - (shadeMode == "off" and 0 or darkness
+                * (shadeMode == "gradient" and math.min(1, gap / distance) or 1))
+              local want = { base[1] * tint, base[2] * tint, base[3] * tint }
+              T.check(math.abs(r - want[1]) + math.abs(g - want[2]) + math.abs(b - want[3]) < 0.04,
+                string.format(
+                  "GPU: %s backdrop %s tint matches real-world distance k=%d tiles (got %.3f,%.3f,%.3f want %.3f,%.3f,%.3f)",
+                  fill, shadeMode, k, r, g, b, want[1], want[2], want[3]))
+              checked = checked + 1
+            end
+          end
+          T.check(checked >= 4, "GPU: " .. fill .. " " .. shadeMode
+            .. " shading check samples multiple real distances")
+          local pr, pg, pb = image:getPixel(dx + 32, 300)
+          T.check(math.abs(pr - colors[1][1]) + math.abs(pg - colors[1][2])
+            + math.abs(pb - colors[1][3]) < 0.03,
+            "GPU: " .. fill .. " " .. shadeMode .. " never darkens the primary map's own pixels")
+          image:release()
+        end
+      end
+      settings.neighbor_shade, settings.connected = "off", false
+      settings.void_fill = "black"
+      def.midLayout = layout
+    end
+
+    -- Check GAME joins at fractional scales, including DPI scaling.
+    do
+      def.midLayout = layout
+      Fill.setMode("map")
+      settings.void_fill, settings.mode, settings.framing = "game", "full", "scene"
+      for _, view in ipairs({ { "screen", 1, 720, 480 }, { "screen", 2, 360, 240 },
+        { "screen", 1, 999, 481 }, { "screen", 1, 800, 333 } }) do
+        local image = ctx.capture(unpack(view))
+        local y = math.floor((view[4] or 480) / 2)
+        local prevGreen = false
+        for x = 0, (view[3] or 720) - 1 do
+          local r, g, b, a = image:getPixel(x, y)
+          T.check(a > 0.99, "GPU: no transparent bleed at backdrop/primary boundary")
+          local isGreen = g > 0.9 and r < 0.1 and b < 0.1
+          local isBlue = b > 0.9 and r < 0.1 and g < 0.1
+          local isBlack = r < 0.02 and g < 0.02 and b < 0.02
+          T.check(isGreen or isBlue or (prevGreen and isBlack),
+            "GPU: seam pixel is either primary green or backdrop blue, no foreign color")
+          if isGreen then prevGreen = true end
+        end
+        image:release()
+      end
+      settings.void_fill = "black"
+    end
+
+    -- Use one solid color across all map and extruded tiles: any black pixel
+    -- at their join is a rendering gap, not intentionally black artwork.
+    do
+      local solid = { width = 30, height = 17, midAt = function() return 0 end }
+      scene.hideFixtureUI = true
+      def.midLayout = solid
+      settings.void_fill, settings.mode, settings.framing = "extrude", "full", "scene"
+      for _, degrees in ipairs({ 0, 15, 35, 50 }) do
+        Tilt.angle, Tilt.level = math.rad(degrees), degrees == 0 and 0 or 2
+        for _, size in ipairs({ { 719, 481 }, { 999, 333 }, { 1360, 768 } }) do
+          local vw, vh = unpack(size)
+          local frame
+          if degrees > 0 then
+            frame = Geometry.project({ x = 0, y = 0, w = 480, h = 272 },
+              vw, vh, 0, 0, "full", 1, nil, Tilt)
+          else
+            local scale = math.min(vw / 480, vh / 272)
+            frame = { point = function(x, y)
+              return (vw - 480 * scale) / 2 + x * scale, (vh - 272 * scale) / 2 + y * scale
+            end }
+          end
+          for _, depth in ipairs({ 1, 2, 8, 16 }) do
+            settings.extrude_depth = depth
+            local image = ctx.capture("screen", 1, vw, vh)
+            local checked = 0
+            for t = 0.1, 0.91, 0.2 do
+              for _, p in ipairs({ { 0, t * 272 }, { 480, t * 272 },
+                { t * 480, 0 }, { t * 480, 272 } }) do
+                local sx, sy = frame.point(p[1], p[2])
+                for oy = -2, 2 do
+                  for ox = -2, 2 do
+                    local x, y = math.floor(sx) + ox, math.floor(sy) + oy
+                    if x >= 0 and x < vw and y >= 80 and y < vh then
+                      local r, g, b, a = image:getPixel(x, y)
+                      T.check(r < 0.01 and g > 0.99 and b < 0.01 and a > 0.99,
+                        ("GPU: no map/extrusion seam angle=%d depth=%d viewport=%dx%d at %d,%d rgba=%.3f,%.3f,%.3f,%.3f")
+                          :format(degrees, depth, vw, vh, x, y, r, g, b, a))
+                      checked = checked + 1
+                    end
+                  end
+                end
+              end
+            end
+            T.check(checked > 30, "GPU: extrusion seam checks straddle authored boundaries")
+            image:release()
+          end
+        end
+      end
+      Tilt.angle, Tilt.level = 0, 0
+      def.midLayout = layout
+      scene.hideFixtureUI = nil
+    end
+
+    -- Real adapter selection must pass the content resolver into the backdrop.
+    do
+      local oldSource = Fill.layoutFor
+      Fill.layoutFor = function(id)
+        return { pair = "general__fixture", borderWidth = 2, borderHeight = 2,
+          borderMids = id == Fill.SOURCES.trees and { 0, 1, 2, 3 } or { 2, 2, 2, 2 } }, false
+      end
+      Fill._borders = {}
+      def.midLayout = { width = 4, height = 30, midAt = function() return 0 end }
+      settings.mode, settings.void_fill, settings.extrude_depth = "full", "extrude", 1
+      local actual = ctx.capture("screen", 1, 720, 480)
+      -- The primary's left edge is x=328: whole-pattern continuation alternates
+      -- the blue right half at x=-1 and green left half at x=-2.
+      color(actual, 320, 296, colors[2], "GPU: actual adapter completes partial tree at depth one")
+      color(actual, 304, 296, colors[1], "GPU: actual adapter repeats the complete tree motif")
+      actual:release()
+      Fill.layoutFor, Fill._borders = oldSource, {}
+      def.midLayout = layout
+    end
+
     -- Optional backdrop allocation failure must not disable the camera.
     settings.void_fill = "black"
     ctx.capture("screen", 1, 720, 480):release()
@@ -305,13 +497,14 @@ return function(ctx)
     end
     for _ = 1, 2 do
       local image = ctx.capture("screen", 1, 720, 480)
-      color(image, 5, 300, colors[5], "GPU: allocation failure retains black margins")
-      color(image, 200, 300, colors[1], "GPU: allocation failure preserves camera terrain")
+      color(image, 5, 300, colors[5], "GPU: draw failure retains black margins")
+      color(image, 200, 300, colors[1], "GPU: draw failure preserves camera terrain")
       image:release()
     end
     lg.newCanvas = allocate
     T.eq(attempts, 1, "failed backdrop is not reallocated every frame")
   end
+
   for i = #saved, 1, -1 do saved[i]() end
   if ctx.capture then
     ctx.capture("screen", 1, 720, 480):release()

@@ -43,6 +43,12 @@ References:
   canvas. Guard pixels prevent packed-atlas seams during fractional scaling.
 - SCREEN uses physical viewport dimensions and the engine's world override.
   A low-resolution preview remains available to engine mirrors/captures.
+- SCREEN FILTER defaults to CRISP. SMOOTH uses derivative-aware terrain sampling
+  with mipmaps for minification, while enlarged terrain samples nearest texel
+  centers. Mipmap storage counts toward the canvas budget. Repeat backdrops use
+  linear minification and nearest magnification on assembled canvases, never on
+  packed atlases. Owned backdrop filters reset after draws, including failures;
+  borrowed terrain/mesh texture state is restored. Retro and Normal are unchanged.
 - The 0.3.22 cell-list/pool scratch state is isolated alongside tile batches.
 - A mod draw error restores scoped state, is logged and propagates. It is not
   hidden or retried midway through the same frame. A faulted camera uses the
@@ -66,6 +72,18 @@ in SCREEN. Area-relative zoom multiplies the whole-area fit. With MAX ZOOM off,
 both enforce a minimum scale to contain the viewport. The optional ceiling uses
 normal-engine scale independently of the zoom basis and overrides that minimum.
 Undersized axes are centered, with only actual terrain composited over the backdrop.
+
+Hybrid multiplies Full's fit by its own 100-200% zoom and follows the player on
+both axes. Only Full's limiting axis is clamped; ties constrain both. Tilt uses
+the projected actor envelope to identify the limiting axis, then scales Full's
+projection and focal distance together before panning. Bounded basis, zoom and
+ceiling settings do not affect Hybrid. Connected capture and map shading are
+shared by Full, Full-Scroll, Hybrid and Bounded, and never determine their
+initial fit or reposition the camera on their own.
+
+FULL-SCROLL reuses the Hybrid flat/Tilt projection code paths with its zoom
+fixed at exactly 1 (no exposed zoom setting), so it shares Hybrid's limiting-axis
+detection and clamping and is otherwise identical to Full's fit and scale.
 
 The mod limits layouts to 32768 metatiles and viewports to 8192 pixels per axis
 or the GPU's lower texture limit. It targets a 128 MiB budget for its own canvases,
@@ -254,3 +272,232 @@ flat and tilted projection, adapter-selected EXTRUDE in capped rooms,
 neighbor-only uniform/gradient shading, brightness after entering a neighbor,
 and unchanged primary framing when optional neighbor allocation fails.
 These fixtures do not replace gameplay checks with imported game assets.
+
+## 0.12.1 boundary corrections
+
+- EXTRUDE uses BLACK for indoor definitions and engine map types 4, 8 and 9
+  (underground, indoor and secret base), matching the importer's indoor grouping.
+  Repeating authored black/decorative interior tiles is avoided rather than
+  substituting guessed wall art. GAME and Normal behavior are unchanged.
+- Flat coverage scissors round both endpoints to pixel-center coverage before
+  deriving width and height. Independent truncation of fractional position/size
+  left uncovered pixels between the raster and extrusion. Reinstating the old
+  scissors reproduces 520 failed assertions in the new GPU suite.
+- Backdrop shading runs once after the backdrop is projected, before terrain
+  and sprites are composited. It shares the terrain shader's distance function
+  and edge guard, using inverse Tilt projection to get each pixel's world
+  position. The gradient never repeats with the texture or steps per tile.
+  The existing repeat canvases remain: no per-frame tile-mesh rewrite or
+  unverified texture-wrap workaround is needed.
+- Only terrain sampling temporarily sees connected placements in `Map.world`.
+  Actor collection sees just the active map, preventing neighbor sprite requests
+  before rendering. Changing exported `Field.applyDrawOrder` would not suffice:
+  both tested engines call their local function directly. World state still
+  restores on rendering failure; no simulation state or engine file is changed.
+
+GPU regressions cover indoor/outdoor changes, primary actor collection without
+neighbor requests, uniform/gradient shading on both neighbors and GAME/EXTRUDE,
+and map/extrusion joins at depths 1, 2, 8 and 16 in flat and 15/35/50-degree Tilt
+views. Fractional viewport fits include 719x481, 999x333 and 1360x768.
+
+Final checks against actual engine modules (synthetic assets):
+
+| Engine | Headless camera | Preview UI | Real LÖVE camera |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 7,811 | 149 | 236,406 |
+| 0.3.22 | 7,811 | 149 | 236,418 |
+
+The separate extrusion suite still passes 1,175 CPU and 58,330 GPU checks
+per engine. The reported gameplay locations and Android hardware were not
+replayed in this validation.
+
+## 0.13.0 content-aware extrusion
+
+`scenery_patterns.lua` recognizes a deliberately limited General-primary
+metatile vocabulary. These are metatile IDs, not adjacency in a packed atlas.
+The rules were visually checked using the player's locally imported FireRed
+General under/over atlas. No extracted artwork or game data is shipped.
+
+- Tree motifs come from `VoidFill.borderFor("trees")`; the imported Pallet border
+  is `[01C,01D;014,015]`. Each boundary tile fixes the phase of that motif, so
+  continuation completes the neighboring halves instead of mirroring pieces.
+  Verified outer canopy `00C/00D` and trunk `024/025` variants map to those phases
+  only when that exact canonical source is present.
+- Ocean fill comes from `VoidFill.borderFor("water")` (Cinnabar, normally
+  `1D9`). Recognized water-rock quarters `110/111/118/119` and
+  `1CB/1CC/1D3/1D4`, plus the explicit open-water family, use that fill.
+- The explicit shoreline table records which directions face water. Extensions
+  in those directions get one finite row of the verified open coastal-water
+  transition `12B`, then ocean. Land-facing and unsupported orientations keep
+  the strip fallback. This is not a general shoreline generator.
+- Every replacement motif must exist in the current atlas via `Native.hasMid`;
+  `slotFor`'s silent slot-zero substitution is never used to validate a pattern.
+  Missing source maps, incompatible primaries and unrecognized pieces preserve
+  existing strips. A missing coastal transition preserves shoreline strips.
+
+The eight existing repeat regions use the least common multiple of the fallback
+strip and recognized motif periods. Thus changing EXTRUDE DEPTH never truncates
+a tree, and unknown strips retain exactly their original sequence. Eight bounded
+one-tile rim regions carry only finite shoreline completions; transparent cells
+leave the base fill alone. All canvases remain included in the resource budget.
+Native under/over assembly and repainting are retained, and weather shade applies
+only to populated rim cells. The shared map-shade pass still runs afterward.
+
+Synthetic tests cover edge/corner phase, all water-rock quarters, water-facing
+versus land-facing shores, missing templates/atlas entries, mixed recognized and
+unknown edges, depths 1/2/8/16, flat and 15/35/50-degree Tilt, and actual adapter
+selection. GPU checks verify the finite coast never repeats and native uniform
+shade is applied once. Other tree variants, custom tilesets and unlisted coastal
+families intentionally remain strip-based.
+
+Final validation: 8,541 headless camera checks and 149 preview checks on each
+engine; 331,156 real-GPU camera checks on 0.3.19 and 331,168 on 0.3.22.
+The separate strip suite adds 1,175 CPU and 58,330 GPU checks per engine.
+Visual rule identification used locally imported FireRed art; gameplay in the
+reported scene and LeafGreen-specific artwork were not replayed.
+
+## 0.13.1 scenery edge cases
+
+The reported Route 9/10, Route 13/18, Saffron and Viridian Forest boundaries were
+checked against locally imported metatile IDs. General-primary rules now include
+the small water-rock family `212/213/21A/21B`, the remaining water variants,
+outer tree connectors, an explicit building-piece set and mountain pieces.
+Buildings use the applicable tree motif; mountains use the verified plateau
+center `071` only when it exists in the atlas. No source-map tiles are replaced.
+
+Viridian Forest has a secondary 3x2 tree motif
+`[298,299,29A;290,291,292]`. The resolver requires that entire authored border
+signature and availability of every output MID before enabling secondary rules.
+It does not assume that the same secondary IDs or a hard-coded ROM address
+identify a forest in another tileset. The forest canopy, closing rows and base
+variants have explicit phases; the forest gate trim uses this same local motif.
+Combined repeat periods remain divisible by both tree widths and fallback depth.
+
+The extra real-GPU cases cover forest phases, new water rocks, gate roofs and
+mountain faces at depths 1/2/8/16 in flat and 15/35/50-degree Tilt. Unit cases
+also reject incomplete atlases and near-matching but different forest borders.
+The authored bottom-of-map detail identified by the user is intentionally
+unchanged. These are synthetic regression checks, not a replay of the saves
+shown in the screenshots.
+
+Final GPU results: 449,160 camera checks on 0.3.19 and 449,172 on 0.3.22,
+plus 58,330 separate extrusion checks per engine. Headless camera and paused
+preview checks also passed on both engine module sets.
+
+## 0.14.0 Hybrid, filtering and directional scenery
+
+Wall classification now separates horizontal and vertical continuation. An
+authored corner chooses the straight piece for the axis crossing the map edge;
+an existing straight wall retains its artwork when extended parallel to itself.
+Two-axis corner background and extensions perpendicular to a straight wall still
+use plateau fill. Missing oriented replacements retain the existing strip
+fallback, not an unrelated atlas slot. Explicit General families include both
+grass-edged and rock-edged mountain walls and the concave `0B2/0B3` pieces.
+
+The Seafoam boundary's mixed water/mountain pieces `10F/117/11F/129`, and water
+variants `1DA/1E1`, now extend as ocean. Cerulean's water-facing crown pair
+`10A/10B` and middle canopy `0FA/0FB` preserve their two-column phase along
+horizontal extensions; the water-facing side becomes ocean. A partial crown
+can complete on the finite rim before the dense tree repeat starts. Grass-facing
+`00E/00F` crowns similarly keep their paired row. No actual map tiles are edited.
+
+Hybrid regression coverage includes both limiting axes and ties, 100/150/200%
+zoom, independence from Bounded controls, flat/Tilt edge behavior, connected
+scenery, shading and paused preview. SCREEN filtering tests use synthetic
+one-pixel patterns at fractional zoom and HiDPI, check magnified pixel edges,
+and preserve the strict default-CRISP map/backdrop seam checks. GAME and EXTRUDE
+backdrops are checked for actual minified smoothing and filter-state restoration.
+
+Final validation with actual engine modules and synthetic graphics:
+
+| Engine | Headless camera | Preview UI | Real LÖVE camera |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 17,396 | 149 | 721,667 |
+| 0.3.22 | 17,396 | 149 | 721,679 |
+
+The separate extrusion suite passes 58,398 GPU checks per engine. These checks
+do not substitute for an in-game replay of the reported saves or certify every
+scenery family and platform.
+
+## 0.15.0 Full-Scroll, Bounded scenery, and corner blending
+
+Added `mode = "scroll"` (SCROLL/Full-Scroll in the menu). Full's own scale is
+`min(vw/w, vh/h)` — limited by whichever axis needs the *most* zoom-out to fit,
+leaving the other axis with slack/backdrop margin. Scroll instead uses
+`max(vw/w, vh/h)` for its scale (flat) or an equivalent single-axis exact-fit
+magnification (Tilt, derived from Full's own projected envelope via the linear
+magnification identity already used by Hybrid, not a fresh perspective
+re-fit): the axis that had slack in Full becomes locked (now fits exactly,
+zero slack, matching Full's own stationary framing on that axis), while the
+axis that was Full's own limiting/edge-touching one instead gets genuine room
+to scroll with the player. Both axes are always clamped to the area's own
+bounds (never revealing void), unlike Hybrid's unconstrained axis, which may
+intentionally expose connected/backdrop scenery. `zoomLevel()` returns `1`
+immediately for `"scroll"` (no exposed zoom setting; the scale is fully
+determined by this fit, not a user zoom multiplied onto it). An earlier version
+of this mode reused Hybrid's own limiting-axis choice unmodified with zoom
+fixed at 1, which is a no-op (identical to Full, since locking the
+already-exactly-fit axis while leaving the already-oversized axis technically
+"free" produces no visible scrolling); it locked precisely the wrong axis.
+
+CONNECTIONS and MAP SHADE were gated by a single `sceneryMode` boolean
+(`mode == "full" or "hybrid" or "partial"`, now also `"scroll"`); the actual
+connected-capture, coverage, and shading code was already mode-agnostic (driven
+only by the current `frame`/`terrain` locals), so extending Bounded required
+no changes beyond that gate. Bounded's own camera stays strictly contained
+within its map (`G.project`'s `partial` branch clamps `x`/`y` to `bounds`), so
+connected/shaded scenery only becomes visible when MAX ZOOM caps the scale
+below what's needed to contain the viewport (the existing undersized-room
+case) — ordinary open-area walking in Bounded still never exposes anything
+past the map edge, matching the setting's "polish, not reframing" intent.
+
+`scenery_patterns.lua`'s diagonal corner cells (`B.regions`' four two-axis
+regions) previously resolved through a single tile clamped to the map's exact
+corner cell, repeated across the whole diagonal region. `classify` now derives
+the corner independently from three sources per cell: the horizontal edge's
+tile (sampled from the corner-adjacent column, `strip(x, w)`-mapped for
+periodicity), the vertical edge's tile (same, by row), and the literal corner
+tile, each resolved through the same per-family rules (`classifySource`) used
+for straight strips. `mergeCorner` picks whichever edge is periodically closer
+to that diagonal cell (`cornerDistance`, matching each axis's repeat period so
+the blend never desyncs from the repeated strip) **only when both edges
+resolved to a recognized replacement**; if only one edge matched a family (the
+overwhelmingly common real-map case: a wall, fence, or building corner meeting
+ordinary unrecognized terrain), that one match is always used regardless of
+distance. An earlier version of this distance tie-break applied even when only
+one side was present, silently discarding that valid match whenever the
+unmatched side happened to be geometrically closer — this made most of the
+corner fixes reported in testing ineffective in practice, since a corner needs
+both sides recognized (rare) for the bug not to trigger. Fixed and covered by
+two new targeted regressions (row-only and column-only recognized corners,
+checked to still fail without the fix). Authored wall corner pieces
+(`cliffCorner`) keep their own artwork at the immediate tie cell instead of
+being overridden.
+
+Added a `fences` MID set (`0D6/0D7/0E6-0E9/0EC-0EE`, `315-317/31D/320/325-327`)
+that self-repeats, checked before building/tree fallback so fence strips are
+never overwritten by adjacent scenery rules winning the corner merge.
+
+Generalized the single Viridian-Forest-specific 3x2 border case into a small
+`motifDefs` list matched by exact authored signature (as before, never by
+address or secondary MID alone): the existing Forest signature, a reversed
+Pattern Bush signature (`290/291/292/298/299/29A`, Six Island), and a Safari
+Zone bush signature (`2F5/2F6/2F7/2FD/2FE/2FF`). Each still requires every
+output MID to exist in the current atlas via `Native.hasMid` before enabling.
+
+New regression coverage: reversed Pattern Bush and Safari 3x2 continuation,
+fence self-repeat, authored cliff-corner preservation, periodic diagonal
+cliff-axis blending, mixed cliff/tree diagonal resolution, the corner-merge
+discard fix (two cases confirmed to fail without it), and flat/Tilt Scroll's
+corrected axis assignment, scale, bounds, and genuine-movement checks
+(confirmed to fail against the original, wrong-axis implementation).
+
+Final validation: CPU `tests/scenery_patterns_test.lua` 1,942/1,942. Real LÖVE
+GPU on 0.3.19: `tests/scenery_patterns_test.lua` 495,526/495,526 standalone,
+full `tests/camera_test.lua` suite 770,216/770,216 (includes the separate
+58,398 extrusion checks), headless camera 18,447/18,447 on both engines. As
+with prior passes, these are synthetic regression checks, not a replay of the
+specific reported saves; map/MID identification for most reported screenshots
+was reduced to confidently-verified MID families and fixed structurally rather
+than confirmed against one exact map (Safari Zone and Six Island were
+confidently identified by exact border signature).

@@ -9,8 +9,8 @@ function B.sample(position, size, depth)
   return position
 end
 
-function B.regions(w, h, depth)
-  local dx, dy = math.min(w, depth), math.min(h, depth)
+function B.regions(w, h, depth, periodX, periodY)
+  local dx, dy = periodX or math.min(w, depth), periodY or math.min(h, depth)
   local regions, pixels = {}, 0
   for iy = -1, 1 do
     for ix = -1, 1 do
@@ -30,7 +30,7 @@ function B.regions(w, h, depth)
   return regions, pixels
 end
 
-function B.new(warn, shade)
+function B.new(warn, shade, Scenery)
   local Fill = require("src.core.game3.void_fill")
   local Native = require("src.core.game3.tileset_native")
   local lg = love.graphics
@@ -52,7 +52,20 @@ function B.new(warn, shade)
     depth = tonumber(depth) or 1
     if depth ~= depth or depth == math.huge or depth == -math.huge then depth = 1 end
     depth = math.max(1, math.floor(depth))
-    local regions, pixels = B.regions(w, h, depth)
+    local content = Scenery and Scenery.new(layout, pair, Fill, Native, depth)
+    local regions, pixels = B.regions(w, h, depth,
+      content and content.periodX, content and content.periodY)
+    if content then
+      -- A finite one-tile coastal completion must never repeat offshore.
+      local rim = B.regions(w, h, 1)
+      for _, region in ipairs(rim) do
+        region.left, region.top = region.x, region.y
+        region.right, region.bottom = region.x + region.w, region.y + region.h
+        region.overlay = true
+        regions[#regions + 1] = region
+        pixels = pixels + region.w * region.h
+      end
+    end
     local limits = lg.getSystemLimits and lg.getSystemLimits()
     local maxSize = limits and limits.texturesize or 8192
     for _, region in ipairs(regions) do
@@ -72,19 +85,27 @@ function B.new(warn, shade)
       region.cells = {}
       for y = 0, region.h / 16 - 1 do
         for x = 0, region.w / 16 - 1 do
-          local sx = B.sample(region.x / 16 + x, w, depth)
-          local sy = B.sample(region.y / 16 + y, h, depth)
-          local slot = Native.slotFor(native, layout:midAt(sx, sy))
-          region.cells[#region.cells + 1] = { x = x * 16, y = y * 16,
-            under = Native.quad(native, slot),
-            over = native.layered and native.overImage and Native.overQuad(native, slot) or nil }
+          local wx, wy = region.x / 16 + x, region.y / 16 + y
+          local mid
+          if region.overlay then mid = content.finish(wx, wy)
+          else
+            mid = content and content.sample(wx, wy)
+            if mid == nil then mid = layout:midAt(B.sample(wx, w, depth), B.sample(wy, h, depth)) end
+          end
+          if mid ~= nil then
+            local slot = Native.slotFor(native, mid)
+            region.cells[#region.cells + 1] = { x = x * 16, y = y * 16,
+              under = Native.quad(native, slot),
+              over = native.layered and native.overImage and Native.overQuad(native, slot) or nil }
+          end
         end
       end
     end
     return { mode = "extrude", regions = regions, pixels = pixels, native = native,
       key = "extrude:" .. tostring(pair) .. ":" .. tostring(layout) .. ":" .. w .. ":" .. h
         .. ":" .. math.min(w, depth) .. ":" .. math.min(h, depth),
-      allocationKey = w .. ":" .. h .. ":" .. math.min(w, depth) .. ":" .. math.min(h, depth) }
+      allocationKey = w .. ":" .. h .. ":" .. (content and content.periodX or math.min(w, depth))
+        .. ":" .. (content and content.periodY or math.min(h, depth)) .. ":" .. tostring(content ~= nil) }
   end
   function self.resolve(layout, pair, modeOverride, depth)
     if modeOverride == "extrude" then return extrude(layout, pair, depth) end
@@ -171,14 +192,14 @@ function B.new(warn, shade)
     for i, region in ipairs(desc.regions) do
       local x, y = math.max(left, region.left), math.max(top, region.top)
       local r, b = math.min(right, region.right), math.min(bottom, region.bottom)
-      if x < r and y < b then
+      if x < r and y < b and #region.cells > 0 then
         local strip = strips[i]
         lg.setCanvas(strip.canvas)
         lg.origin()
         lg.setScissor()
         lg.setShader()
         lg.setBlendMode("alpha", "alphamultiply")
-        lg.clear(0, 0, 0, 1)
+        lg.clear(0, 0, 0, region.overlay and 0 or 1)
         lg.setColor(1, 1, 1, 1)
         for _, cell in ipairs(region.cells) do
           if cell.under then lg.draw(desc.native.image, cell.under, cell.x, cell.y) end
@@ -186,7 +207,12 @@ function B.new(warn, shade)
         end
         if shade then
           lg.push("all")
-          shade(region.w, region.h)
+          if region.overlay then
+            for _, cell in ipairs(region.cells) do
+              lg.setScissor(cell.x, cell.y, 16, 16)
+              shade(region.w, region.h)
+            end
+          else shade(region.w, region.h) end
           lg.pop()
         end
         lg.setCanvas(target)
@@ -202,7 +228,8 @@ function B.new(warn, shade)
             vertices[n] = { sx, sy, (p[1] - region.x) / region.w,
               (p[2] - region.y) / region.h, q }
           end
-          strip.canvas:setFilter("linear", "linear")
+          strip.canvas:setFilter(frame.screenFilter == "crisp" and "nearest" or "linear",
+            frame.screenFilter and "nearest" or "linear")
           local ok, err = pcall(function()
             mesh:setTexture(strip.canvas)
             mesh:setVertices(vertices)
@@ -210,14 +237,17 @@ function B.new(warn, shade)
             lg.draw(mesh)
           end)
           mesh:setTexture(texture)
+          strip.canvas:setFilter("nearest", "nearest")
           lg.setShader(previousShader)
           if not ok then error(err, 0) end
         else
-          strip.canvas:setFilter("nearest", "nearest")
+          strip.canvas:setFilter(frame.screenFilter == "smooth" and "linear" or "nearest", "nearest")
           strip.quad:setViewport((x - region.x) % region.w, (y - region.y) % region.h,
             r - x, b - y, region.w, region.h)
-          lg.draw(strip.canvas, strip.quad, (x - left) * frame.scale,
+          local ok, err = pcall(lg.draw, strip.canvas, strip.quad, (x - left) * frame.scale,
             (y - top) * frame.scale, 0, frame.scale, frame.scale)
+          strip.canvas:setFilter("nearest", "nearest")
+          if not ok then error(err, 0) end
         end
       end
     end
@@ -264,10 +294,12 @@ function B.new(warn, shade)
       projection.background(Renderer, canvas, frame)
       return
     end
-    canvas:setFilter("nearest", "nearest")
+    canvas:setFilter(frame.screenFilter == "smooth" and "linear" or "nearest", "nearest")
     local x, y = frame.x - frame.dx / frame.scale, frame.y - frame.dy / frame.scale
     quad:setViewport(x % width, y % height, vw / frame.scale, vh / frame.scale, width, height)
-    lg.draw(canvas, quad, 0, 0, 0, frame.scale, frame.scale)
+    ok, err = pcall(lg.draw, canvas, quad, 0, 0, 0, frame.scale, frame.scale)
+    canvas:setFilter("nearest", "nearest")
+    if not ok then error(err, 0) end
   end
   return self
 end

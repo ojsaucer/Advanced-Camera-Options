@@ -9,7 +9,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $files = @(
     'manifest.json', 'main.lua', 'geometry.lua', 'adapter_gen3.lua',
     'settings_help.lua', 'tilt_geometry.lua', 'tilt_render.lua',
-    'void_backdrop.lua', 'boundary_shading.lua', 'compatibility.lua', 'mod.card', 'README.md', 'CHANGELOG.md',
+    'void_backdrop.lua', 'scenery_patterns.lua', 'boundary_shading.lua', 'compatibility.lua', 'mod.card', 'README.md', 'CHANGELOG.md',
     'docs\TECHNICAL.md', 'CONTRIBUTING.md'
 )
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'manifest.json') -Raw | ConvertFrom-Json

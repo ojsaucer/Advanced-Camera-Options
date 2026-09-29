@@ -32,6 +32,11 @@ return function(ctx)
     shading.draw(field, 0, 0, 640, 480, "uniform", 1, 128, function() lg.draw(base) end)
     T.eq(warnings, 1, "shader failure is reported")
     T.eq(seen[base], "none", "shader failure preserves original terrain")
+    local frame = { x = 0, y = 0, dx = 0, dy = 0, scale = 1 }
+    shading.backdrop(frame, 720, 480, 640, 480, "uniform", 1, 128)
+    T.eq(warnings, 2, "backdrop shader failure is reported independently")
+    shading.backdrop(frame, 720, 480, 640, 480, "gradient", 1, 128)
+    T.eq(warnings, 2, "backdrop shader failure is latched until disposal")
   end, debug.traceback)
   shading.dispose()
   lg.draw, lg.newShader, lg.setShader, lg.getShader = originalDraw, newShader, setShader, getShader

@@ -4,7 +4,7 @@ package.path = package.path .. ";./?.lua;./?/init.lua"
 local T = require("tests.modkit")
 local files = {}
 for _, name in ipairs({ "manifest.json", "main.lua", "geometry.lua", "adapter_gen3.lua",
-  "settings_help.lua", "tilt_geometry.lua", "tilt_render.lua", "void_backdrop.lua", "boundary_shading.lua",
+  "settings_help.lua", "tilt_geometry.lua", "tilt_render.lua", "void_backdrop.lua", "scenery_patterns.lua", "boundary_shading.lua",
   "compatibility.lua" }) do
   local file = assert(io.open(root .. "\\" .. name, "rb"))
   files["mods/static_camera/" .. name] = file:read("*a")
@@ -81,6 +81,70 @@ end
 T.raises(function()
   G.project({ x = 0, y = 0, w = 32, h = 32 }, 240, 160, 0, 0, "partial", 1, 1, 0)
 end, "maximum scale", "invalid cap is diagnosed")
+
+for _, b in ipairs({ { x = 32, y = 48, w = 960, h = 160 },
+  { x = 32, y = 48, w = 160, h = 960 }, { x = 32, y = 48, w = 480, h = 320 } }) do
+  for _, v in ipairs({ { 240, 160 }, { 160, 240 }, { 720, 480 } }) do
+    local full = G.project(b, v[1], v[2], 0, 0, "full", 1)
+    for _, zoom in ipairs({ 1, 1.05, 1.5, 2 }) do
+      for _, fraction in ipairs({ 0, 0.25, 0.5, 0.75, 1 }) do
+        local px, py = b.x + (b.w - 16) * fraction, b.y + (b.h - 16) * fraction
+        local f = G.project(b, v[1], v[2], px, py, "hybrid", zoom, 9, 0.05)
+        T.eq(f.scale, full.scale * zoom, "Hybrid zoom is relative to Full, never Bounded basis/ceiling")
+        local vx, vy = f.x - f.dx / f.scale, f.y - f.dy / f.scale
+        T.check(f.w > 0 and f.h > 0 and f.x >= b.x and f.y >= b.y
+          and f.x + f.w <= b.x + b.w + 1e-7 and f.y + f.h <= b.y + b.h + 1e-7,
+          "Hybrid captures only the valid primary intersection")
+        for _, a in ipairs({ { f.constrainX, vx, v[1], b.x, b.w, px },
+          { f.constrainY, vy, v[2], b.y, b.h, py } }) do
+          if a[1] then
+            T.check(a[2] >= a[4] - 1e-7 and a[2] + a[3] / f.scale <= a[4] + a[5] + 1e-7,
+              "Hybrid constrains the Full edge-touching axis")
+            if zoom == 1 then T.check(math.abs(a[2] - a[4]) < 1e-7, "100% constrained axis stays centered") end
+          else
+            T.check(math.abs(a[2] + a[3] / f.scale / 2 - a[6] - 8) < 1e-7,
+              "Hybrid freely follows player on the other axis")
+          end
+        end
+      end
+    end
+  end
+end
+local tie = G.project({ x = 0, y = 0, w = 480, h = 320 }, 240, 160, 0, 0, "hybrid", 2)
+T.check(tie.constrainX and tie.constrainY, "Hybrid constrains both axes for a tied Full fit")
+
+for _, b in ipairs({ { x = 32, y = 48, w = 960, h = 160 }, { x = 32, y = 48, w = 160, h = 960 },
+  { x = 32, y = 48, w = 480, h = 320 } }) do
+  for _, v in ipairs({ { 240, 160 }, { 720, 480 } }) do
+    local rx, ry = b.w / v[1], b.h / v[2]
+    local tolerance = 1e-7 * math.max(rx, ry)
+    -- The axis Full already fit without slack (limiting) is the one Scroll
+    -- instead scrolls; the other (Full's slack/backdrop axis) stays locked.
+    local scrollsX, scrollsY = rx >= ry - tolerance, ry >= rx - tolerance
+    for _, fraction in ipairs({ 0, 0.5, 1 }) do
+      local px, py = b.x + (b.w - 16) * fraction, b.y + (b.h - 16) * fraction
+      local f = G.project(b, v[1], v[2], px, py, "scroll", 1)
+      T.eq(f.scale, math.max(v[1] / b.w, v[2] / b.h),
+        "Full-Scroll zooms in to exactly fit whichever axis Full left slack on")
+      T.check(f.w <= b.w + 1e-7 and f.h <= b.h + 1e-7 and f.x >= b.x - 1e-7 and f.y >= b.y - 1e-7
+        and f.x + f.w <= b.x + b.w + 1e-7 and f.y + f.h <= b.y + b.h + 1e-7,
+        "Full-Scroll never reveals anything past the area's own bounds")
+      if scrollsX and scrollsY then
+        T.check(f.constrainX and f.constrainY, "Full-Scroll keeps both axes stationary on an exact tie")
+      elseif scrollsX then
+        T.check(not f.constrainX and f.constrainY,
+          "Full-Scroll scrolls Full's own edge-touching axis, not the slack one")
+        T.check(f.w < b.w - 1e-7, "Full-Scroll's scrolling axis has genuine room to move")
+        T.check(math.abs(f.h - b.h) < 1e-7, "Full-Scroll's locked axis exactly fits the area")
+      else
+        T.check(not f.constrainY and f.constrainX,
+          "Full-Scroll scrolls Full's own edge-touching axis, not the slack one")
+        T.check(f.h < b.h - 1e-7, "Full-Scroll's scrolling axis has genuine room to move")
+        T.check(math.abs(f.w - b.w) < 1e-7, "Full-Scroll's locked axis exactly fits the area")
+      end
+    end
+  end
+end
 
 local function room(x, y, d)
   local tx, ty = x + d[1], y + d[2]
@@ -199,7 +263,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   })
   T.eq(#run.errors, 0, version .. " real loader accepts entry: " .. tostring(run.errors[1]))
   T.check(run.loader.exports.static_camera ~= nil, "entry actually executed")
-  T.eq(#(run.loader.optionSchemas.static_camera or {}), 16, "sixteen settings registered")
+  T.eq(#(run.loader.optionSchemas.static_camera or {}), 18, "eighteen settings registered")
   local rows, byKey, keys = run.loader.optionSchemas.static_camera, {}, {}
   for _, row in ipairs(rows) do
     byKey[row.key], keys[#keys + 1] = row, row.key
@@ -210,12 +274,21 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
     end
   end
   T.same(keys, { "mode", "connected", "neighbor_shade", "neighbor_darkness", "neighbor_distance",
-    "zoom_style", "zoom", "max_zoom", "framing", "padding", "resolution",
+    "hybrid_zoom", "zoom_style", "zoom", "max_zoom", "framing", "padding", "resolution", "screen_filter",
     "void_fill", "extrude_depth", "transition", "duration", "experimental" },
     "Full settings precede Bounded settings, followed by shared settings")
   T.eq(byKey.resolution.default, "retro", "existing visual style remains the default")
+  T.eq(byKey.screen_filter.default, "crisp", "SCREEN smoothing is opt-in")
+  T.same(byKey.screen_filter.choices, { { "CRISP", "crisp" }, { "SMOOTH", "smooth" } },
+    "SCREEN filter offers hard pixels or minification smoothing")
   T.eq(byKey.void_fill.default, "black", "black margins remain the safe default")
   T.eq(byKey.zoom_style.default, "consistent", "consistent zoom is default")
+  T.eq(byKey.mode.choices[2][2], "scroll", "Full-Scroll is a distinct mode between Full and Hybrid")
+  T.eq(byKey.mode.choices[3][2], "hybrid", "Hybrid is a distinct mode between Full-Scroll and Bounded")
+  T.eq(byKey.hybrid_zoom.default, 100, "Hybrid starts at Full scale")
+  T.eq(byKey.hybrid_zoom.min, 100, "Hybrid only zooms in")
+  T.eq(byKey.hybrid_zoom.max, 200, "Hybrid maximum matches the existing zoom range")
+  T.eq(byKey.hybrid_zoom.step, 5, "Hybrid zoom uses five percent steps")
   T.eq(byKey.zoom.min, 5, "5 percent minimum")
   T.eq(byKey.zoom.max, 200, "200 percent maximum")
   T.eq(byKey.zoom.step, 5, "5 percent steps")
@@ -322,6 +395,25 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
     pixels:release()
     lg.setCanvas(sentinel)
   end
+  local hybridX, hybridY = P.px, P.py
+  settings.mode, settings.max_zoom = "hybrid", 5
+  for _, value in ipairs({ 100, 150, 200, 1, 800, 128, "invalid" }) do
+    settings.hybrid_zoom = value
+    local expectedZoom = type(value) == "number" and math.max(100, math.min(200,
+      math.floor(value / 5 + 0.5) * 5)) / 100 or 1
+    for _, px in ipairs({ 80, 96 }) do
+      P.px = px
+      game:draw()
+      local f = G.project({ x = 0, y = 0, w = 640, h = 480 }, 240, 160,
+        P.px, P.py, "hybrid", expectedZoom)
+      T.eq(seen.w, math.ceil(f.w) + 3, "Hybrid renderer captures moving primary width with guards")
+      T.eq(seen.h, math.ceil(f.h) + 3, "Hybrid renderer captures moving primary height with guards")
+      T.eq(seen.panX, math.floor(f.x) - 1 - math.floor(P.px + 8 - seen.w / 2),
+        "Hybrid native capture alignment follows player without mutating position")
+    end
+  end
+  P.px, P.py = hybridX, hybridY
+  settings.hybrid_zoom, settings.max_zoom = 100, 0
   settings.mode = "normal"
   game:draw()
   T.eq(seen.w, 240, "Normal uses original viewport")
@@ -418,6 +510,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
 end
 assert(loadfile(root .. "\\tests\\settings_help_test.lua"))()({ T = T, root = root })
 assert(loadfile(root .. "\\tests\\boundary_shading_test.lua"))()({ T = T, root = root })
+assert(loadfile(root .. "\\tests\\scenery_patterns_test.lua"))()({ T = T, root = root })
 if not love._staticCameraGpu then
   assert(loadfile(root .. "\\tests\\tilt_test.lua"))()({ T = T, root = root })
   assert(loadfile(root .. "\\tests\\void_fill_test.lua"))()({ T = T, root = root })

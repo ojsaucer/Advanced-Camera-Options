@@ -8,6 +8,12 @@ function G.clamp(n, lo, hi)
   return math.max(lo, math.min(hi, n))
 end
 
+function G.limitingAxes(width, height, vw, vh)
+  local x, y = width / vw, height / vh
+  local tolerance = 1e-7 * math.max(x, y)
+  return x >= y - tolerance, y >= x - tolerance
+end
+
 function G.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, maxScale)
   for _, key in ipairs({ "x", "y", "w", "h" }) do
     assert(G.finite(bounds[key]), "Invalid camera bound: " .. key)
@@ -20,6 +26,37 @@ function G.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, maxScale)
   assert(bounds.w > 0 and bounds.h > 0)
   local x, y, w, h = bounds.x, bounds.y, bounds.w, bounds.h
   local scale = math.min(vw / w, vh / h)
+  if mode == "hybrid" then
+    local constrainX, constrainY = G.limitingAxes(w, h, vw, vh)
+    scale = scale * zoom
+    local viewW, viewH = vw / scale, vh / scale
+    local viewX, viewY = px + 8 - viewW / 2, py + 8 - viewH / 2
+    if constrainX then viewX = G.clamp(viewX, x, x + w - viewW) end
+    if constrainY then viewY = G.clamp(viewY, y, y + h - viewH) end
+    local capture = G.intersection(bounds, { x = viewX, y = viewY, w = viewW, h = viewH })
+    -- The adapter supplies an in-map player; keep direct off-map probes valid too.
+    capture = capture or { x = G.clamp(px, x, x + w - 1),
+      y = G.clamp(py, y, y + h - 1), w = 1, h = 1 }
+    return { x = capture.x, y = capture.y, w = capture.w, h = capture.h,
+      scale = scale, dx = (capture.x - viewX) * scale, dy = (capture.y - viewY) * scale,
+      constrainX = constrainX, constrainY = constrainY }
+  end
+  if mode == "scroll" then
+    -- Full's own scale is limited by whichever axis needs the MOST zoom-out
+    -- (the min of the two fits). Scroll instead uses the LEAST zoom-out
+    -- needed (the max): the axis that already fit without slack in Full stays
+    -- locked here too, while the other axis - the one Full had to shrink
+    -- further to accommodate - gets genuine room to scroll with the player,
+    -- clamped to the map's own bounds so it never reveals anything past it.
+    scale = math.max(vw / w, vh / h)
+    local viewW, viewH = vw / scale, vh / scale
+    local constrainY, constrainX = G.limitingAxes(w, h, vw, vh)
+    local viewX = G.clamp(px + 8 - viewW / 2, x, x + w - viewW)
+    local viewY = G.clamp(py + 8 - viewH / 2, y, y + h - viewH)
+    return { x = viewX, y = viewY, w = viewW, h = viewH,
+      scale = scale, dx = 0, dy = 0,
+      constrainX = constrainX, constrainY = constrainY }
+  end
   if mode == "partial" then
     -- Without a map-independent reference, retain the original area-relative fit.
     scale = math.max((referenceScale or scale) * zoom, vw / w, vh / h)

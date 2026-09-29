@@ -1,5 +1,15 @@
 return function(ctx)
   local T, game, settings = ctx.T, ctx.game, ctx.settings
+  local Adapter = assert(loadfile(ctx.root .. "\\adapter_gen3.lua"))()
+  local budget = 32 * 1024 * 1024
+  T.check(Adapter.withinCanvasBudget(0, 0, 8192, 4096, false),
+    "unmipmapped raster retains the existing 128 MiB budget")
+  T.check(not Adapter.withinCanvasBudget(0, 0, 8192, 4096, false, 0, true),
+    "SCREEN mip chain is included in the same hard budget")
+  T.check(Adapter.withinCanvasBudget(0, 0, 3, 5, false, budget - 18, true),
+    "non-power-of-two mip storage is counted exactly")
+  T.check(not Adapter.withinCanvasBudget(0, 0, 3, 5, false, budget - 17, true),
+    "one pixel over the budget is rejected with mipmaps")
   local lg = love.graphics
   local Renderer = require("src.render.Renderer")
   local Session = require("src.core.game3.runtime")
@@ -118,7 +128,7 @@ return function(ctx)
       Renderer:endWorldPass()
       lg.clear(0, 0, 0, 0)
       lg.setColor(1, 0, 0, 1)
-      lg.rectangle("fill", 10, 10, 20, 10)
+      if not self.hideFixtureUI then lg.rectangle("fill", 10, 10, 20, 10) end
       lg.setColor(1, 1, 1, 1)
       if self.engineFade then require("src.ui.game3.fade").draw() end
       if self.battleTransition then self.battleTransition.draw() end
@@ -212,6 +222,77 @@ return function(ctx)
       return def
     end
     local large, small = sizedMap(80, 60), sizedMap(8, 8)
+    scene.data.maps.FIXTURE = large
+    settings.mode, settings.zoom_style, settings.max_zoom = "partial", "consistent", 0
+    local oldFilter = settings.screen_filter
+    settings.screen_filter = "smooth"
+    local Player = require("src.core.game3.player")
+    local originalX, originalY = Player.px, Player.py
+    for _, zoom in ipairs({ 25, 50, 65 }) do
+      settings.zoom = zoom
+      for _, phase in ipairs({ 0, 0.25, 0.75 }) do
+        Player.px, Player.py = 640 + phase, 480 + phase
+        for _, view in ipairs({ { 1, 720, 480 }, { 2, 360, 240 }, { 1.5, 480, 320 }, { 1, 722, 482 } }) do
+          local pixels = capture("screen", unpack(view))
+          local greenSum, blended = 0, 0
+          for x = 100, 599 do
+            local _, green = pixels:getPixel(x, 300)
+            greenSum = greenSum + green
+            if green > 0.05 and green < 0.95 then blended = blended + 1 end
+          end
+          if zoom < 34 then
+            T.check(math.abs(greenSum / 500 - 0.5) < 0.02,
+              "GPU: smooth SCREEN minification preserves stripe energy across motion/DPI")
+            T.check(blended > 100, "GPU: smooth SCREEN minification retains subpixel detail")
+          else
+            T.eq(blended, 0, "GPU: SMOOTH keeps fractional magnification fully crisp")
+          end
+          T.eq(nativeWidth, view[1] * view[2], "GPU: filtering does not change physical output width")
+          T.eq(nativeHeight, view[1] * view[3], "GPU: filtering does not change physical output height")
+          pixels:release()
+        end
+      end
+    end
+    Player.px, Player.py = originalX, originalY
+    local Tilt = require("src.render.Tilt")
+    local oldAngle, oldLevel = Tilt.angle, Tilt.level
+    local TiltGeometry = assert(loadfile(ctx.root .. "\\tilt_geometry.lua"))()
+    settings.mode = "full"
+    for _, angle in ipairs({ 15, 35, 50 }) do
+      Tilt.angle, Tilt.level = math.rad(angle), 2
+      for _, view in ipairs({ { 720, 480 }, { 360, 240 }, { 999, 481 } }) do
+        local f = TiltGeometry.project({ x = 0, y = 0, w = 1280, h = 960 },
+          view[1], view[2], Player.px, Player.py, "full", 1, nil, Tilt)
+        local left, y = f.point(128, 288)
+        local right = f.point(1152, 288)
+        local pixels = capture("screen", 1, view[1], view[2])
+        local sum, count = 0, 0
+        for x = math.ceil(left) + 3, math.floor(right) - 3 do
+          local r, g, b = pixels:getPixel(x, math.floor(y))
+          T.check(r < 0.02 and g + b > 0.98, "GPU: Tilt minification does not introduce dark seams or foreign colors")
+          sum, count = sum + g, count + 1
+        end
+        T.check(count > 50 and math.abs(sum / count - 0.5) < 0.025,
+          "GPU: SCREEN Tilt mipmapped minification preserves high-frequency detail energy")
+        pixels:release()
+      end
+    end
+    Tilt.angle, Tilt.level = oldAngle, oldLevel
+    settings.screen_filter, settings.mode, settings.zoom = "crisp", "partial", 25
+    local crisp = capture("screen", 1, 720, 480)
+    for x = 100, 599 do
+      local _, g, b = crisp:getPixel(x, 300)
+      T.check((g > 0.99 and b < 0.01) or (g < 0.01 and b > 0.99),
+        "GPU: CRISP never smooths minified terrain")
+    end
+    crisp:release()
+    settings.screen_filter = "crisp"
+    local retroCrisp = capture("retro", 1, 720, 480)
+    settings.screen_filter = "smooth"
+    local retroSmooth = capture("retro", 1, 720, 480)
+    T.eq(retroSmooth:getString(), retroCrisp:getString(), "GPU: SCREEN FILTER has no effect on RETRO pixels")
+    retroCrisp:release(); retroSmooth:release()
+    settings.screen_filter = "smooth"
     local function stripeWidths(pixels)
       local shortest, longest, start, previous = math.huge, 0, 70, nil
       for x = 70, 650 do
@@ -242,6 +323,13 @@ return function(ctx)
               local expected = (3 + offset) * zoom / 100
               T.eq(lo, expected, "GPU: smallest stripe has consistent physical pixel width")
               T.eq(hi, expected, "GPU: largest stripe has consistent physical pixel width")
+              if resolution == "screen" then
+                for x = 100, 299 do
+                  local _, g, b = pixels:getPixel(x, 300)
+                  T.check((g > 0.99 and b < 0.01) or (g < 0.01 and b > 0.99),
+                    "GPU: SCREEN integer magnification keeps pixel interiors unblurred")
+                end
+              end
               local worldWidth = resolution == "screen" and view[1] * view[2] / expected
                 or Renderer.worldCanvas:getWidth() / (zoom / 100)
               T.eq(ctx.seen.w, math.ceil(worldWidth) + 3,
@@ -252,6 +340,7 @@ return function(ctx)
         end
       end
     end
+    settings.screen_filter = oldFilter
     Zoom.offset, settings.zoom = 0, 100
     for _, resolution in ipairs({ "retro", "screen" }) do
       scene.data.maps.FIXTURE, settings.zoom = ctx.def, 50

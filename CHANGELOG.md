@@ -3,6 +3,66 @@
 What's new for players. For implementation and testing details, see the
 [technical reference](docs/TECHNICAL.md).
 
+## 0.15.0
+
+- Added SCROLL (Full-Scroll) mode: zoom in until the area's shorter dimension
+  exactly fills the viewport (staying stationary like Full), while the camera
+  follows the player along the other, longer dimension, stopping at its edges.
+  A tie keeps both axes stationary like Full. This corrects an initial version
+  of this mode that locked the wrong axis, so the camera never actually scrolled.
+- CONNECTIONS and MAP SHADE now also work in Bounded mode, filling in scenery
+  or darkening only what the moving camera can already see past the area's
+  edge; they never reposition the camera toward areas you haven't entered.
+- Fixed EXTRUDE's concave (inner) map-boundary corners so they blend the two
+  meeting edges instead of repeating a single corner tile, fixing several
+  tree/rock-wall and building/path corner seams. This fixes a bug where the
+  blend silently discarded a valid match whenever only one side of a corner
+  was recognized scenery (the common case of a wall or fence corner meeting
+  ordinary terrain), which had made most of these corner fixes ineffective.
+- Added a recognized fence family so fences repeat as themselves instead of
+  being overwritten by neighboring tree/cliff rules.
+- Recognized two more 3x2 bush-border tree families (in addition to Viridian
+  Forest's), completing more maps' partial borders instead of repeating cut
+  fragments.
+
+## 0.14.0
+
+- Added Hybrid mode: zoom into Full's view from 100-200%, follow the player, and
+  constrain only Full's edge-touching axis. Connections and Map Shade are shared
+  by Full and Hybrid.
+- Added optional SCREEN FILTER: keep the default crisp pixels or choose Smooth
+  to reduce zoomed-out aliasing in terrain and backgrounds.
+- Extended straight rock walls across map edges and continued wall corners with
+  appropriately oriented wall pieces, rather than replacing every wall with
+  mountaintop terrain.
+- Fixed more mixed rock/water extensions around Seafoam and completed paired
+  tree canopies along water boundaries.
+
+## 0.13.1
+
+- Fixed incomplete tree repetition around Viridian Forest by using its own
+  three-tile-wide tree pattern, and recognized more outdoor tree-edge pieces.
+- Removed more repeated water-rock variants from ocean extensions.
+- Replaced recognized building and gatehouse extensions with trees, and cliff
+  extensions with solid mountaintop terrain. The real map remains unchanged.
+
+## 0.13.0
+
+- Made EXTRUDE content-aware for recognized General-tileset scenery: complete
+  tree patterns, ocean water instead of repeated water rocks, and a short
+  shoreline completion before open water.
+- Unrecognized scenery still uses the existing edge strips and selected depth.
+  Indoor black backgrounds, map shading and camera framing are unchanged.
+
+## 0.12.1
+
+- EXTRUDE now uses a black backdrop indoors and underground instead of repeating
+  walls, decorations and empty tiles.
+- Fixed thin gaps where extruded backgrounds meet the map at fractional zoom.
+- Map Shade now also darkens GAME and EXTRUDE backgrounds, with a continuous
+  gradient around the current map, even with connected scenery turned off.
+- Connected scenery no longer displays or loads neighboring NPC sprites.
+
 ## 0.12.0
 
 - Added EXTRUDE backgrounds that repeat the map's individual edge tiles, with

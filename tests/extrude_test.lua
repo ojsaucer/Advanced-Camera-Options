@@ -167,6 +167,36 @@ local function run(ctx)
       check(sampled > 100, "GPU Tilt checks cover substantial outside terrain")
     end
     Tilt.angle = angle
+    local draw = lg.draw
+    for _, filter in ipairs({ "crisp", "smooth" }) do
+      for _, tilted in ipairs({ false, true }) do
+        local filtered = tilted and Geometry.project({ x = 0, y = 0, w = 48, h = 32 },
+          208, 192, 0, 0, "full", 1, nil, Tilt) or frame
+        filtered.screenFilter = filter
+        local sampled, canvases = 0, {}
+        lg.draw = function(object, ...)
+          local texture = object:typeOf("Mesh") and object:getTexture() or object
+          if texture:typeOf("Canvas") then
+            local min, mag = texture:getFilter()
+            check(min == (filter == "smooth" and "linear" or "nearest") and mag == "nearest",
+              "GPU backdrop filter follows SCREEN selection without smoothing enlarged pixels")
+            sampled = sampled + 1
+            canvases[texture] = true
+          end
+          return draw(object, ...)
+        end
+        lg.setCanvas(output)
+        backdrop.draw(desc, filtered, 208, 192, {}, Renderer)
+        lg.draw = draw
+        check(sampled > 0, "GPU screen filter checks actual repeat textures")
+        for texture in pairs(canvases) do
+          local min, mag = texture:getFilter()
+          check(min == "nearest" and mag == "nearest", "GPU owned backdrop filters restore after draw")
+        end
+      end
+    end
+    frame.screenFilter = nil
+    lg.setCanvas()
     lg.pop()
   else
     check(allocations == 8, "allocation stays bounded regardless of visible world")

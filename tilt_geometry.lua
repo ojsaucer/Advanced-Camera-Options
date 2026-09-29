@@ -29,11 +29,14 @@ function T.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, Tilt, env
   assert(maxScale == nil or (type(maxScale) == "number" and maxScale > 0
     and maxScale < math.huge), "Invalid maximum scale")
   local groundPoint = Tilt.groundPoint
+  local magnification = 1
   envelope = envelope or T.envelope({})
   local margin = math.max(160, envelope.left, envelope.right, envelope.top, envelope.bottom)
   local function point(x, y, cx, cy, scale)
-    return groundPoint(vw / 2 + (x - cx) * scale,
-      vh / 2 + (y - cy) * scale, vw, vh)
+    local sx, sy, q = groundPoint(vw / 2 + (x - cx) * scale / magnification,
+      vh / 2 + (y - cy) * scale / magnification, vw, vh)
+    return vw / 2 + (sx - vw / 2) * magnification,
+      vh / 2 + (sy - vh / 2) * magnification, q
   end
   local cx, cy = bounds.x + bounds.w / 2, bounds.y + bounds.h / 2
   local corners = { { bounds.x, bounds.y }, { bounds.x + bounds.w, bounds.y },
@@ -57,7 +60,61 @@ function T.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, Tilt, env
   local fullScale, scale, dx, dy = lo, lo, 0, 0
   local capture = { x = bounds.x, y = bounds.y, w = bounds.w, h = bounds.h }
   local footprint, ground = nil, capture
-  if mode == "partial" then
+  local constrainX, constrainY
+  if mode == "hybrid" or mode == "scroll" then
+    local l, t, r, b = extents(fullScale)
+    local xRatio, yRatio = (r - l) / vw, (b - t) / vh
+    local tolerance = 1e-7 * math.max(xRatio, yRatio)
+    local limitX, limitY = xRatio >= yRatio - tolerance, yRatio >= xRatio - tolerance
+    local m = zoom
+    if mode == "scroll" then
+      -- Swapped from Hybrid: lock the axis that already fit Full without
+      -- slack (limitX/limitY true), letting the OTHER axis - the one Full
+      -- had to shrink further to accommodate - scroll with the player.
+      -- Magnify by exactly enough that the now-locked axis's own projected
+      -- envelope fits its viewport dimension precisely; the previously
+      -- limiting axis then necessarily exceeds its dimension, giving genuine
+      -- (still clamped, never void-revealing) room to scroll.
+      constrainX, constrainY = limitY, limitX
+      m = constrainX and (vw / (r - l)) or (vh / (b - t))
+    else
+      constrainX, constrainY = limitX, limitY
+    end
+    -- Magnify Full's actual projected envelope, not a new perspective fit.
+    -- Scaling focal distance too preserves its horizon and upright proportions.
+    magnification, scale, focal = m, fullScale * m, focal * m
+    l, r = vw / 2 + (l - vw / 2) * m, vw / 2 + (r - vw / 2) * m
+    t, b = vh / 2 + (t - vh / 2) * m, vh / 2 + (b - vh / 2) * m
+    local sx, sy = point(px + 8, py + 8, cx, cy, scale)
+    local function offset(n, low, high)
+      if low > high then return (low + high) / 2 end
+      return math.max(low, math.min(high, n))
+    end
+    if mode == "scroll" then
+      -- Never expose void on either axis: the locked axis's range is a single
+      -- point by construction above; the scrolling axis gets a real range.
+      dx = offset(vw / 2 - sx, vw - r, -l)
+      dy = offset(vh / 2 - sy, vh - b, -t)
+    else
+      dx = constrainX and offset(vw / 2 - sx, vw - r, -l) or vw / 2 - sx
+      dy = constrainY and offset(vh / 2 - sy, vh - b, -t) or vh / 2 - sy
+    end
+    local left, top, right, bottom = math.huge, math.huge, -math.huge, -math.huge
+    local horizon = angle > 0 and vh / 2 + dy - focal * vh / math.tan(angle) or -math.huge
+    footprint = {}
+    for i, p in ipairs({ { 0, math.max(0, horizon + 0.5) },
+      { vw, math.max(0, horizon + 0.5) }, { vw, vh }, { 0, vh } }) do
+      local x, y = T.inverse(p[1] - dx, p[2] - dy, vw, vh, angle, focal)
+      x, y = cx + x / scale, cy + y / scale
+      footprint[i] = { x, y }
+      left, top, right, bottom = math.min(left, x), math.min(top, y),
+        math.max(right, x), math.max(bottom, y)
+    end
+    ground = { x = left, y = top, w = right - left, h = bottom - top }
+    local x, y = math.max(bounds.x, left - margin), math.max(bounds.y, top - margin)
+    capture = { x = x, y = y, w = math.min(bounds.x + bounds.w, right + margin) - x,
+      h = math.min(bounds.y + bounds.h, bottom + margin) - y }
+  elseif mode == "partial" then
     local l, t, r, b = math.huge, math.huge, -math.huge, -math.huge
     footprint = {}
     for i, p in ipairs({ { 0, 0 }, { vw, 0 }, { vw, vh }, { 0, vh } }) do
@@ -89,7 +146,8 @@ function T.project(bounds, vw, vh, px, py, mode, zoom, referenceScale, Tilt, env
   end
   local frame = { x = capture.x, y = capture.y, w = capture.w, h = capture.h,
     scale = scale, dx = dx, dy = dy, cx = cx, cy = cy, vw = vw, vh = vh,
-    footprint = footprint, angle = angle, bounds = bounds, ground = ground }
+    footprint = footprint, angle = angle, focal = focal, bounds = bounds, ground = ground }
+  frame.constrainX, frame.constrainY = constrainX, constrainY
   frame.horizon = angle > 0 and vh / 2 + dy - focal * vh / math.tan(angle) or -math.huge
   function frame.worldAt(sx, sy)
     local x, y = T.inverse(sx - dx, sy - dy, vw, vh, angle, focal)

@@ -2,8 +2,9 @@
 
 **See FireRed and LeafGreen from a different perspective.**
 
-Choose a stationary view of the whole area, a camera that follows you without
-scrolling past map edges, or the game's normal camera.
+Choose a stationary whole-area view, a one-axis scrolling view, a zoomable
+Hybrid view, a camera that follows you within map edges, or the game's normal
+camera.
 
 **[Download the latest release](https://github.com/ojsaucer/Advanced-Camera-Options/releases/latest)**
  · [Installation](#installation) · [Launcher updates](#launcher-updates) · [Settings](#settings)
@@ -13,6 +14,13 @@ scrolling past map edges, or the game's normal camera.
 
 - **Full Static:** see the entire area at once while your character moves around
   inside a stationary scene.
+- **Full-Scroll:** zoom in until the area's shorter dimension exactly fills the
+  screen and stays stationary, while the camera follows your character along
+  the other, longer dimension, stopping at its edges. A tie keeps the camera
+  stationary like Full Static.
+- **Hybrid:** zoom into Full's framing and follow your character, constraining
+  only the axis that touches the screen edges in Full. The other axis can show
+  extruded or connected scenery.
 - **Bounded:** follow your character until the camera reaches the area's edges.
   See the Tilt corner limitation below.
 - **Normal:** switch back to the game's usual camera whenever you want.
@@ -22,14 +30,17 @@ scrolling past map edges, or the game's normal camera.
   zoom between areas or make it relative to each area's size.
 - **Comfortable interiors:** optionally cap Bounded zoom so small rooms do not
   become excessively enlarged. Leftover space uses your selected backdrop.
-- **Connected scenery:** optionally show directly connected maps around Full
-  mode's view without shrinking the current area.
+- **Connected scenery:** optionally show directly connected maps around Full,
+  Full-Scroll, Hybrid, or Bounded views without changing current-area framing
+  or repositioning the camera toward areas you haven't entered.
 - **Clearer zoomed-out views:** optional Screen Resolution preserves more detail
-  without making dialogue or menus larger.
+  without making dialogue or menus larger. Keep crisp pixels or enable Smooth
+  filtering to reduce aliasing when zoomed out.
 - **Matching backgrounds:** optionally use the game's Void Fill choice around
   the area, following Tilt and forest shade, or choose **Extrude** to repeat
-  strips of the map's own boundary tiles.
-- **Clear map boundaries:** darken connected-map terrain uniformly or gradually
+  complete recognized trees and extend water naturally, with edge strips for
+  unrecognized scenery.
+- **Clear map boundaries:** darken connected-map terrain and backgrounds uniformly or gradually
   with distance, without dimming your current map or characters.
 - **Area transitions:** choose fade, a slide toward the connected area you enter,
   or no added transition.
@@ -119,25 +130,28 @@ This is an engine installer issue, not something the mod can fix before it loads
 
 ## Settings
 
-The options start with camera mode, then **Full-specific**, **Bounded-specific**,
-and **shared** settings. Mode-specific options stay visible for configuration
-but only affect their named camera mode. Most changes take effect immediately.
+The 19 options start with camera mode, then **scenery (Full/Full-Scroll/Hybrid/Bounded)**,
+**Hybrid zoom**, **Bounded-specific**, and **shared** settings. Mode-specific options stay
+visible for configuration but only affect their named camera mode. Most changes take
+effect immediately.
 
 | Setting | What it does |
 | --- | --- |
-| **CAMERA MODE** | **FULL** shows the whole area; **BOUNDED** follows within its edges; **NORMAL** restores the game's camera. |
-| **FULL: CONNECTIONS** | **ON** shows directly connected scenery in Full mode's margins without changing framing. **OFF** by default. |
-| **FULL: MAP SHADE** | **OFF**, **UNIFORM**, or **GRADIENT**. Darkens neighboring terrain only, when connections are on. |
-| **SHADE STRENGTH %** | **0-100%** darkness; default **60%**. Higher makes neighboring terrain darker. |
+| **CAMERA MODE** | **FULL** shows the whole area; **SCROLL** (Full-Scroll) zooms in until the area's shorter dimension exactly fills the screen and scrolls the longer one; **HYBRID** zooms into Full and follows with one-axis constraints; **BOUNDED** follows within all edges; **NORMAL** restores the game's camera. |
+| **CONNECTIONS** | **ON** shows directly connected terrain, without neighboring NPCs or changes to framing. In Bounded this only fills in scenery the moving camera can already see past the area's edge; it never repositions the camera toward areas you haven't entered. **OFF** by default. |
+| **MAP SHADE** | **OFF**, **UNIFORM**, or **GRADIENT**. Darkens neighboring terrain and GAME/EXTRUDE backgrounds outside the current map. Works with connections off too. |
+| **SHADE STRENGTH %** | **0-100%** darkness; default **60%**. Higher makes the surrounding terrain and background darker. |
 | **SHADE DISTANCE** | **1-32 tiles**; default **8**. Distance from the active map's edge where a gradient reaches full strength. |
+| **HYBRID ZOOM %** | **100-200%** of Full's fit, in **5% steps**; default **100%**. Only affects Hybrid. |
 | **BOUNDED: BASIS** | **NORMAL** keeps zoom consistent between areas. **AREA FIT** bases it on the whole-area view instead. |
 | **BOUNDED ZOOM %** | **5-200%**, in **5% steps**. Higher means closer. Only affects Bounded mode. |
 | **MAX ZOOM** | **OFF**, or **5-200%** in 5% steps. Caps Bounded zoom at a percentage of normal engine scale, regardless of Zoom Basis. Small rooms use backdrop margins when needed. |
 | **AREA FRAMING** | **SCENE** includes the whole authored map. **TERRAIN** crops around terrain connected to your entry point. |
 | **CROP PADDING** | Adds **0-4 map tiles** around a terrain crop. |
 | **WORLD RESOLUTION** | **RETRO** keeps the original pixelated look. **SCREEN** keeps more detail when zooming out. |
-| **VOID BACKDROP** | **BLACK** leaves black margins. **GAME** follows the game's Void Fill selection. **EXTRUDE** repeats strips from inside the map's edges. |
-| **EXTRUDE DEPTH** | **1-16 tiles**, default **1**. How many inward rows to copy and repeat outward, limited by the map's size. |
+| **SCREEN FILTER** | **CRISP** (default) keeps hard pixel edges. **SMOOTH** reduces minification aliasing in SCREEN terrain and backgrounds; enlarged pixels stay crisp. Does not affect Retro or Normal mode. |
+| **VOID BACKDROP** | **BLACK** leaves black margins. **GAME** follows the game's Void Fill selection. **EXTRUDE** extends recognized outdoor scenery intelligently, with edge-strip fallback; indoors and underground stay black. |
+| **EXTRUDE DEPTH** | **1-16 tiles**, default **1**. How many inward rows to repeat for unrecognized scenery. Recognized tree patterns and water are independent of this depth. |
 | **AREA TRANSITION** | **NONE**, **FADE** or **SLIDE**. Slide direction follows the map connection automatically. |
 | **TRANSITION MS** | Transition duration, **50-2000 milliseconds**. Higher means slower. |
 | **UNTESTED ENGINE** | **OFF** by default. **TRY** allows attempting an untested stable engine version in the supported range. |
@@ -147,25 +161,61 @@ EXTRUDE uses the map's own tiles independently of that game setting.
 
 For a closer moving view, try **BOUNDED**, **BOUNDED: BASIS: NORMAL** and
 **WORLD RESOLUTION: SCREEN**, then adjust zoom to taste. For a stationary
-whole-area view, choose **FULL**.
+whole-area view, choose **FULL**. For a corridor-like area that's much longer
+in one direction, choose **SCROLL** to zoom in until the shorter side exactly
+fits and scroll along the longer one, without any extra zoom setting.
+
+For a closer view with decorative edges, choose **HYBRID**, **VOID BACKDROP:
+EXTRUDE**, then increase **HYBRID ZOOM %**. Hybrid follows the player on both
+axes, but clamps only the axis whose opposite edges touch the viewport in Full.
+If both axes fit exactly, both are constrained. At 100%, the constrained axis
+stays centered; the other axis can still follow. Bounded's zoom controls and
+MAX ZOOM do not affect Hybrid. Connections and Map Shade work in Full,
+Full-Scroll, Hybrid and Bounded alike.
 
 If interiors look too large, try **MAX ZOOM: 100%**. **OFF** preserves the old
 strict map-only framing. The cap also overrides a higher Bounded Zoom setting.
 
 ### Extruded edges and map boundaries
 
-Choose **VOID BACKDROP: EXTRUDE**, then set **EXTRUDE DEPTH**. At depth 1, each
+Choose **VOID BACKDROP: EXTRUDE** for content-aware outdoor backgrounds:
+
+- Recognized trees are completed at the edge, then repeated as whole patterns.
+- Recognized water rocks are replaced with the game's ocean-water pattern in
+  the extension; the rocks on the real map stay untouched.
+- Recognized water-facing shorelines finish once, then extend as open water,
+  rather than repeating coastlines indefinitely.
+- Viridian Forest, Six Island's Pattern Bush, and the Safari Zone each use
+  their own three-tile-wide tree/bush pattern rather than the smaller
+  outdoor pattern.
+- Recognized fences repeat as themselves instead of being overwritten by
+  neighboring tree or cliff rules.
+- Recognized building and gatehouse pieces extend as trees instead of repeated
+  roof fragments. Straight rock walls continue along their direction; corner
+  pieces straighten to match the map edge being crossed. Other cliff extensions
+  use solid mountaintop terrain.
+- Diagonal map corners blend whichever of the two meeting edges is closer,
+  instead of repeating a single corner tile.
+
+Recognition currently covers verified families in FRLG's **General** tileset
+and Viridian Forest's matching tree-border set,
+not every tree, rock, shoreline or custom tileset. Unrecognized scenery keeps
+the existing **EXTRUDE DEPTH** behavior: at depth 1, each
 boundary tile repeats straight outward. At depth 3, the outermost tile repeats
 first, followed by the next two tiles inward, then the strip repeats again.
 Corners repeat the corresponding corner patch. Tiles keep their orientation.
 This is decorative, not walkable terrain, and works best on maps with suitable
 edge scenery. The source is the authored map edge, not the Terrain crop.
+Connected maps still draw over the background; this never edits real terrain.
+Indoors and underground, EXTRUDE automatically uses black so walls, decorations
+and empty map tiles do not repeat around the room.
 
-For visible map boundaries, enable **FULL: CONNECTIONS** and choose
-**FULL: MAP SHADE**. Uniform shading provides a clear brightness change;
-Gradient starts clear at your map's boundary and darkens into neighboring maps.
+For visible map boundaries, choose **MAP SHADE**. Uniform shading provides
+a clear brightness change; Gradient starts clear at your map's boundary and
+darkens outward, across both connected terrain and GAME/EXTRUDE backgrounds.
 The effect follows Tilt, leaves characters and menus unchanged, and moves to
-the new map's boundary when you cross. It does not darken the decorative backdrop.
+the new map's boundary when you cross. Connections do not need to be enabled.
+Connected scenery contains terrain only: neighboring NPC sprites are not rendered.
 
 Older H-scroll and V-scroll preferences now use Slide; the old reverse-animation
 setting is ignored. Changes without a reliable connection direction switch

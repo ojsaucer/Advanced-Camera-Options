@@ -130,8 +130,8 @@ return function(ctx)
     T.eq(State.updateOptions, classOptions, "ManagerState class remains untouched")
     T.eq(Manager.draw, originalDraw, "FRLG module draw remains untouched")
     T.check(layer.mod ~= Manager, "affordance belongs only to live stack entry")
-    local expected = { mode = true, zoom_style = true, zoom = true, max_zoom = true, framing = true,
-      padding = true, connected = true, resolution = true, void_fill = true, transition = true,
+    local expected = { mode = true, hybrid_zoom = true, zoom_style = true, zoom = true, max_zoom = true, framing = true,
+      padding = true, connected = true, resolution = true, screen_filter = true, void_fill = true, transition = true,
       duration = true, experimental = true, neighbor_shade = true, neighbor_darkness = true,
       neighbor_distance = true, extrude_depth = true }
     local byKey = {}
@@ -246,7 +246,7 @@ return function(ctx)
         T.eq(writes, before, "all help navigation leaves saved settings untouched")
       end
     end
-    T.eq(next(expected), nil, "all sixteen current setting keys were exercised")
+    T.eq(next(expected), nil, "all eighteen current setting keys were exercised")
     m.cursor, m.scroll = 1, 0
     press("right")
     T.check(writes > 0, "stock option editing still works outside help")

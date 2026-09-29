@@ -1,19 +1,65 @@
 local R = {}
 
+function R.samplingShader()
+  return love.graphics.newShader([[
+    uniform vec2 textureSize;
+    uniform vec4 sampleBounds;
+    uniform bool projected;
+    varying float depthScale;
+    #ifdef VERTEX
+    attribute float VertexScale;
+    vec4 position(mat4 transform_projection, vec4 vertex_position) {
+      depthScale = projected ? VertexScale : 1.0;
+      VaryingTexCoord = vec4(VertexTexCoord.xy * depthScale, 0.0, 1.0);
+      return transform_projection * vertex_position;
+    }
+    #endif
+    #ifdef PIXEL
+    vec4 effect(vec4 color, Image image, vec2 tc, vec2 sc) {
+      vec2 texel = tc / depthScale * textureSize;
+      vec2 footprint = max(fwidth(texel), vec2(0.0001));
+      // Filtering is opt-in and minification-only: never soften enlarged
+      // pixels, including at fractional magnifications.
+      bool minified = any(greaterThan(footprint, vec2(1.0001)));
+      vec2 sampleAt = minified ? texel : floor(texel) + vec2(0.5);
+      sampleAt = clamp(sampleAt, sampleBounds.xy + vec2(0.5), sampleBounds.zw - vec2(0.5));
+      // Mip levels may contain neighboring terrain or shaded guard texels.
+      // Use level zero at authored edges so those cannot bleed into this map.
+      vec2 edge = min(texel - sampleBounds.xy, sampleBounds.zw - texel);
+      if (!minified || any(lessThan(edge, footprint * 2.0))) {
+        return Texel(image, sampleAt / textureSize, -1000.0) * color;
+      }
+      return Texel(image, sampleAt / textureSize) * color;
+    }
+    #endif
+  ]])
+end
+
+function R.configureSampling(shader, image, projected, bounds)
+  shader:send("textureSize", { image:getDimensions() })
+  shader:send("projected", projected)
+  shader:send("sampleBounds", bounds or { 0, 0, image:getWidth(), image:getHeight() })
+end
+
 function R.available(Renderer)
   return Renderer:tiltShader() and Renderer:tiltMesh()
 end
-local function drawMesh(Renderer, image, vertices)
+local function drawMesh(Renderer, image, vertices, samplingShader, sampleBounds, screenFilter)
   local lg = love.graphics
-  local mesh, shader = assert(Renderer:tiltMesh()), assert(Renderer:tiltShader())
+  local mesh, shader = assert(Renderer:tiltMesh()), samplingShader or assert(Renderer:tiltShader())
   local texture, previousShader = mesh:getTexture(), lg.getShader()
+  local min, mag, anisotropy = image:getFilter()
   local ok, err = pcall(function()
+    image:setFilter(screenFilter == "crisp" and "nearest" or "linear",
+      screenFilter and "nearest" or "linear")
     mesh:setTexture(image)
     mesh:setVertices(vertices)
+    if samplingShader then R.configureSampling(samplingShader, image, true, sampleBounds) end
     lg.setShader(shader)
     lg.draw(mesh)
   end)
   mesh:setTexture(texture)
+  image:setFilter(min, mag, anisotropy)
   lg.setShader(previousShader)
   if not ok then error(err, 0) end
 end
@@ -32,8 +78,7 @@ function R.background(Renderer, image, frame)
     local _, _, q = frame.point(wx, wy)
     vertices[i] = { p[1], p[2], (wx - ox) / w, (wy - oy) / h, q }
   end
-  image:setFilter("linear", "linear")
-  drawMesh(Renderer, image, vertices)
+  drawMesh(Renderer, image, vertices, nil, nil, frame.screenFilter)
 end
 
 -- Ground is assembled at integer 1:1 world pixels by the adapter. Only the
@@ -49,8 +94,8 @@ function R.ground(Renderer, raster, frame, captureX, captureY, captureW, capture
     local sx, sy, q = frame.point(p[1], p[2])
     vertices[i] = { sx, sy, (p[1] - captureX) / captureW, (p[2] - captureY) / captureH, q }
   end
-  raster:setFilter("linear", "linear")
-  drawMesh(Renderer, raster, vertices)
+  drawMesh(Renderer, raster, vertices, frame.samplingShader,
+    { x - captureX, y - captureY, r - captureX, bottom - captureY }, frame.screenFilter)
 end
 
 function R.actors(Tilt, Field, frame, captureX, captureY, draw)

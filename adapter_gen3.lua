@@ -1,6 +1,13 @@
 local Adapter = {}
-function Adapter.withinCanvasBudget(w, h, rasterW, rasterH, upright, backdropPixels)
-  return w * h * (upright and 4 or 3) + rasterW * rasterH + (backdropPixels or 0) <= 32 * 1024 * 1024
+function Adapter.withinCanvasBudget(w, h, rasterW, rasterH, upright, backdropPixels, mipmaps)
+  local pixels = rasterW * rasterH
+  if mipmaps and rasterW > 0 and rasterH > 0 then
+    while rasterW > 1 or rasterH > 1 do
+      rasterW, rasterH = math.max(1, math.floor(rasterW / 2)), math.max(1, math.floor(rasterH / 2))
+      pixels = pixels + rasterW * rasterH
+    end
+  end
+  return w * h * (upright and 4 or 3) + pixels + (backdropPixels or 0) <= 32 * 1024 * 1024
 end
 local function pack(...) return { n = select("#", ...), ... } end
 local function result(r)
@@ -70,15 +77,19 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
     warn(key, "Invalid " .. key .. " setting; using its default.")
     return default
   end
-  local function zoomLevel()
-    local value = mod.options:get("zoom")
+  local function zoomLevel(mode)
+    if mode == "scroll" then return 1 end
+    local key = mode == "hybrid" and "hybrid_zoom" or "zoom"
+    local default, minimum = mode == "hybrid" and 100 or 200, mode == "hybrid" and 100 or 5
+    local value = mod.options:get(key)
     if not G.finite(value) then
-      warn("zoom", "Invalid zoom setting; using 200%.")
-      return 2
+      warn(key, "Invalid zoom setting; using " .. default .. "%.")
+      return default / 100
     end
-    local bounded = G.clamp(math.floor(value / 5 + 0.5) * 5, 5, 200)
+    local bounded = G.clamp(math.floor(value / 5 + 0.5) * 5, minimum, 200)
     if value ~= bounded then
-      warn("zoom", "Zoom is limited to 5-200% in 5% steps; open mod options to update the saved value.")
+      warn(key, "Zoom is limited to " .. minimum
+        .. "-200% in 5% steps; open mod options to update the saved value.")
     end
     return bounded / 100
   end
@@ -106,8 +117,9 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
     local cache, cacheKey, cropKey, crop = {}, nil, nil, nil
     local published, failedScreenKey
     local presentation = {}
+    presentation.sampling = tiltModules and tiltModules.render or tiltModule("tilt_render")
     presentation.shading = tiltModule("boundary_shading").new(warn)
-    local backdrop = capabilities.backdrop and Backdrop.new(warn, shade)
+    local backdrop = capabilities.backdrop and Backdrop.new(warn, shade, tiltModule("scenery_patterns"))
     local backdropPixels = 0
 
     local function clearCache()
@@ -139,6 +151,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       backdropPixels = 0
       release(raster)
       raster, rw, rh = nil, nil, nil
+      if presentation.samplingShader then release(presentation.samplingShader) end
+      presentation.samplingShader = nil
       cropKey, crop, failedScreenKey = nil, nil, nil
       envelopeKey, envelope = nil, nil
       clearCache()
@@ -213,18 +227,19 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       outgoing = lg.newCanvas(w, h, { dpiscale = 1 })
       for _, canvas in ipairs({ live, last, outgoing }) do canvas:setFilter("nearest", "nearest") end
     end
-    local function ensureRaster(w, h, extra)
+    local function ensureRaster(w, h, extra, mipmaps)
       local limits = lg.getSystemLimits and lg.getSystemLimits()
       local maxSize = limits and limits.texturesize or 8192
       assert(w <= maxSize and h <= maxSize, "World raster exceeds GPU texture dimensions")
-      assert(Adapter.withinCanvasBudget(bw or 0, bh or 0, w, h, extra, backdropPixels),
+      assert(Adapter.withinCanvasBudget(bw or 0, bh or 0, w, h, extra, backdropPixels, mipmaps),
         "World raster exceeds 128 MiB camera canvas budget")
-      if raster and rw == w and rh == h then return end
+      if raster and rw == w and rh == h and presentation.rasterMipmaps == mipmaps then return end
       release(raster)
       raster = nil
-      raster = lg.newCanvas(w, h, { dpiscale = 1 })
+      raster = lg.newCanvas(w, h, { dpiscale = 1, mipmaps = mipmaps and "manual" or "none" })
       raster:setFilter("nearest", "nearest")
-      rw, rh = w, h
+      if mipmaps and raster.setMipmapFilter then raster:setMipmapFilter("linear") end
+      rw, rh, presentation.rasterMipmaps = w, h, mipmaps
     end
     local function targetSize(w, h)
       if choice("resolution", "retro", { retro = true, screen = true }) ~= "screen" then
@@ -272,7 +287,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         presentation.crossing = nil
         return nextDraw(g, w, h, opts)
       end
-      local mode = choice("mode", "normal", { full = true, partial = true, normal = true })
+      local mode = choice("mode", "normal", { full = true, scroll = true, hybrid = true, partial = true, normal = true })
       if mode == "normal" then return nextDraw(g, w, h, opts) end
       w, h = w or 240, h or 160
       if not presentation.previewing then presentation.viewW, presentation.viewH = w, h end
@@ -290,6 +305,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       end
 
       local renderW, renderH, screen = targetSize(w, h)
+      local screenFilter = screen and choice("screen_filter", "crisp",
+        { crisp = true, smooth = true }) or nil
       local tilted = tiltRequested and capabilities.tilt
       if tilted and (not G.finite(Tilt.angle) or Tilt.angle < 0
         or Tilt.angle > math.rad(50) + 1e-8 or not G.finite(Tilt.FOCAL) or Tilt.FOCAL <= 0) then
@@ -320,6 +337,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       end
       local framing = choice("framing", "scene", { scene = true, reachable = true })
       local fill = choice("void_fill", "black", { black = true, game = true, extrude = true })
+      if fill == "extrude" and (def.type == "indoor" or def.mapType == 4
+        or def.mapType == 8 or def.mapType == 9) then fill = "black" end
       local border
       if backdrop then
         if fill == "game" then border = backdrop.resolve(layout, def.pair or layout.pair)
@@ -342,11 +361,14 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       local normalScale = screen and Zoom.scale(Renderer:fitScale()) or 1
       local limit = number("max_zoom", 0, 0, 200)
       local maxScale = limit > 0 and normalScale * math.max(5, math.floor(limit / 5 + 0.5) * 5) / 100 or nil
-      local connected = mode == "full" and mod.options:get("connected") == true and capabilities.connections
+      local sceneryMode = mode == "full" or mode == "scroll" or mode == "hybrid" or mode == "partial"
+      local connected = sceneryMode and mod.options:get("connected") == true and capabilities.connections
       local neighborKey = tostring(id) .. ":" .. tostring(layout) .. ":" .. renderW .. ":" .. renderH
       if not connected then presentation.neighborFailure = nil end
       if presentation.neighborFailure == neighborKey then connected = false end
       local neighborShade = connected and choice("neighbor_shade", "off",
+        { off = true, uniform = true, gradient = true }) or "off"
+      local voidShadeMode = sceneryMode and choice("neighbor_shade", "off",
         { off = true, uniform = true, gradient = true }) or "off"
       local referenceScale
       if mode == "partial" and choice("zoom_style", "consistent",
@@ -356,8 +378,9 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         referenceScale = normalScale
       end
       local signature = table.concat({ mode, framing, number("padding", 1, 0, 4),
-        tilted and Tilt.angle or "flat", referenceScale or "relative", zoomLevel(), fill,
-        maxScale or "uncapped", fill == "extrude" and number("extrude_depth", 1, 1, 16) or 0 }, ":")
+        tilted and Tilt.angle or "flat", referenceScale or "relative", zoomLevel(mode), fill,
+        maxScale or "uncapped", fill == "extrude" and number("extrude_depth", 1, 1, 16) or 0,
+        screenFilter or "retro" }, ":")
       if projectionKey ~= signature then
         valid, area, motion, presentation.crossing = nil, nil, nil, nil
       end
@@ -397,10 +420,10 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         end
         envelope = nextEnvelope
         frame = tiltModules.geometry.project(bounds, renderW, renderH, Player.px, Player.py,
-          mode, zoomLevel(), referenceScale, Tilt, envelope, maxScale)
+          mode, zoomLevel(mode), referenceScale, Tilt, envelope, maxScale)
       else
         frame = G.project(bounds, renderW, renderH, Player.px, Player.py, mode,
-          zoomLevel(), referenceScale, maxScale)
+          zoomLevel(mode), referenceScale, maxScale)
       end
       local scopedWorld = { { id = id, def = def, ox = 0, oy = 0 } }
       local terrain = { bounds }
@@ -454,7 +477,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       local nativeFlip = screen and Renderer.mirrorsWorldOverride and Renderer.mirrorsWorldOverride()
       local rasterOK, rasterError = pcall(function()
         if not tilted and not nativeFlip and upright then release(upright); upright = nil end
-        ensureRaster(captureW, captureH, tilted or nativeFlip)
+        ensureRaster(captureW, captureH, tilted or nativeFlip,
+          screenFilter == "smooth" and (tilted or frame.scale < 1))
         if (tilted or nativeFlip) and not upright then
           upright = lg.newCanvas(renderW, renderH, { dpiscale = 1 })
           upright:setFilter("nearest", "nearest")
@@ -481,6 +505,13 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         warn("raster", "Camera disabled after world raster allocation failure: " .. tostring(rasterError))
         return nextDraw(g, w, h, opts)
       end
+      if screenFilter == "smooth" and presentation.samplingShader == nil then
+        local ok, shader = pcall(presentation.sampling.samplingShader)
+        presentation.samplingShader = ok and shader or false
+        if not ok then warn("screen-sampling", "Pixel-aware SCREEN sampling unavailable; using filtered output: " .. tostring(shader)) end
+      end
+      frame.screenFilter = screenFilter
+      frame.samplingShader = screenFilter == "smooth" and presentation.samplingShader or nil
       local key = tostring(id) .. ":" .. tostring(layout) .. ":" .. captureW .. ":" .. captureH .. ":" .. tostring(connected)
       for _, entry in ipairs(scopedWorld) do
         key = key .. ":" .. entry.id .. ":" .. tostring(entry.def.midLayout) .. ":" .. entry.ox .. ":" .. entry.oy
@@ -500,10 +531,20 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         return spans(radius, fw, fh, Player.px + 8 - captureX, Player.py + 8 - captureY)
       end
       -- Scope connected-map isolation to this synchronous draw, never simulation.
-      Map.world = scopedWorld
+      local actorWorld = { scopedWorld[1] }
+      Map.world = actorWorld
       Map.neighborList = {}
       Map.refreshWorld = function() return Map.world end
-      if not connected then
+      if connected then
+        -- Only terrain sampling sees neighbors; native actor collection sees
+        -- the primary map. The outer draw fence restores world state on error.
+        Map.worldMidAt = function(...)
+          Map.world = scopedWorld
+          local mid, pair, void = sample(...)
+          Map.world = actorWorld
+          return mid, pair, void
+        end
+      else
         Map.worldMidAt = function(x, y)
           return layout:midAt(x, y), def.pair or layout.pair,
             x < 0 or y < 0 or x >= layout.width or y >= layout.height
@@ -523,6 +564,10 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
           number("neighbor_distance", 8, 1, 32) * 16, function()
             nextDraw(g, captureW, captureH, tilted and { skipActors = true } or opts)
           end)
+        if presentation.rasterMipmaps then
+          lg.setCanvas()
+          if raster.generateMipmaps then raster:generateMipmaps() end
+        end
         if tilted then
           lg.setCanvas(live)
           lg.origin()
@@ -532,6 +577,9 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
           lg.clear(0, 0, 0, 1)
           lg.setColor(1, 1, 1, 1)
           if backdrop then backdrop.draw(border, frame, renderW, renderH, tiltModules.render, Renderer) end
+          presentation.shading.backdrop(frame, renderW, renderH, layout.width * 16, layout.height * 16,
+            voidShadeMode, number("neighbor_darkness", 60, 0, 100) / 100,
+            number("neighbor_distance", 8, 1, 32) * 16)
           for _, rect in ipairs(coverage) do
             tiltModules.render.ground(Renderer, raster, frame, captureX, captureY, captureW, captureH, rect)
           end
@@ -577,11 +625,29 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         lg.clear(0, 0, 0, 1)
         lg.setColor(1, 1, 1, 1)
         if backdrop then backdrop.draw(border, frame, renderW, renderH) end
+        presentation.shading.backdrop(frame, renderW, renderH, layout.width * 16, layout.height * 16,
+          voidShadeMode, number("neighbor_darkness", 60, 0, 100) / 100,
+          number("neighbor_distance", 8, 1, 32) * 16)
         for _, rect in ipairs(coverage) do
-          lg.setScissor(frame.dx + (rect.x - frame.x) * frame.scale,
-            frame.dy + (rect.y - frame.y) * frame.scale, rect.w * frame.scale, rect.h * frame.scale)
-          lg.draw(raster, frame.dx + (captureX - frame.x) * frame.scale,
+          -- Match quad pixel coverage; truncating a fractional scissor can
+          -- leave a one-pixel gap against the separately projected backdrop.
+          local left = math.floor(frame.dx + (rect.x - frame.x) * frame.scale + 0.5)
+          local top = math.floor(frame.dy + (rect.y - frame.y) * frame.scale + 0.5)
+          local right = math.floor(frame.dx + (rect.x + rect.w - frame.x) * frame.scale + 0.5)
+          local bottom = math.floor(frame.dy + (rect.y + rect.h - frame.y) * frame.scale + 0.5)
+          lg.setScissor(left, top, right - left, bottom - top)
+          if frame.samplingShader then
+            presentation.sampling.configureSampling(frame.samplingShader, raster, false,
+              { rect.x - captureX, rect.y - captureY,
+                rect.x + rect.w - captureX, rect.y + rect.h - captureY })
+            lg.setShader(frame.samplingShader)
+          end
+          local min, mag, anisotropy = raster:getFilter()
+          if screenFilter == "smooth" then raster:setFilter("linear", "nearest") end
+          local ok, err = pcall(lg.draw, raster, frame.dx + (captureX - frame.x) * frame.scale,
             frame.dy + (captureY - frame.y) * frame.scale, 0, frame.scale, frame.scale)
+          raster:setFilter(min, mag, anisotropy)
+          if not ok then error(err, 0) end
         end
       end) end
 
@@ -660,7 +726,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
         detach()
         return oldDraw(self, ...)
       end
-      if fault or choice("mode", "normal", { full = true, partial = true, normal = true }) == "normal" then
+      if fault or choice("mode", "normal", { full = true, scroll = true, hybrid = true, partial = true, normal = true }) == "normal" then
         clear()
         return oldDraw(self, ...)
       end

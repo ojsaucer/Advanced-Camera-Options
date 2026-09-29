@@ -90,6 +90,113 @@ return function(ctx)
     end
   end
   Tilt.angle, Tilt.level = originalAngle, originalLevel
+  for _, degrees in ipairs({ 0, 15, 35, 50 }) do
+    Tilt.angle = math.rad(degrees)
+    for _, b in ipairs({ bounds, { x = 32, y = 48, w = 960, h = 160 },
+      { x = 32, y = 48, w = 160, h = 960 }, { x = 32, y = 48, w = 64, h = 64 } }) do
+      for _, size in ipairs({ { 240, 160 }, { 360, 720 }, { 720, 480 } }) do
+        local vw, vh = size[1], size[2]
+        local full = Geometry.project(b, vw, vh, 0, 0, "full", 1, nil, Tilt, large)
+        local l, t, r, bottom = math.huge, math.huge, -math.huge, -math.huge
+        for _, p in ipairs({ { b.x, b.y }, { b.x + b.w, b.y },
+          { b.x + b.w, b.y + b.h }, { b.x, b.y + b.h } }) do
+          local x, y, q = full.point(p[1], p[2])
+          l, r = math.min(l, x - large.left * full.scale * q), math.max(r, x + large.right * full.scale * q)
+          t, bottom = math.min(t, y - large.top * full.scale * q), math.max(bottom, y + large.bottom * full.scale * q)
+        end
+        for _, zoom in ipairs({ 1, 1.05, 1.5, 2 }) do
+          for _, fraction in ipairs({ 0, 0.5, 1 }) do
+            local px, py = b.x + (b.w - 16) * fraction, b.y + (b.h - 16) * fraction
+            local f = Geometry.project(b, vw, vh, px, py, "hybrid", zoom, 99, Tilt, large, 0.05)
+            T.eq(f.scale, full.scale * zoom, "Tilt Hybrid magnifies Full independently of Bounded settings")
+            T.eq(f.constrainX, (r - l) / vw >= (bottom - t) / vh - 1e-7,
+              "Tilt Hybrid selects horizontal constraint from actual upright envelope")
+            T.eq(f.constrainY, (bottom - t) / vh >= (r - l) / vw - 1e-7,
+              "Tilt Hybrid selects vertical constraint from actual upright envelope")
+            local sx, sy = f.point(px + 8, py + 8)
+            if not f.constrainX then T.check(math.abs(sx - vw / 2) < 1e-7, "Tilt Hybrid follows horizontal player") end
+            if not f.constrainY then T.check(math.abs(sy - vh / 2) < 1e-7, "Tilt Hybrid follows vertical player") end
+            T.check(f.w > 0 and f.h > 0 and f.x >= b.x and f.y >= b.y
+              and f.x + f.w <= b.x + b.w + 1e-7 and f.y + f.h <= b.y + b.h + 1e-7,
+              "Tilt Hybrid capture has a valid authored intersection including actor feet")
+            for _, p in ipairs({ { b.x, b.y }, { b.x + b.w, b.y + b.h },
+              { px + 8, py + 16 } }) do
+              local x, y, q = f.point(p[1], p[2])
+              local wx, wy = f.worldAt(x, y)
+              local _, _, fullQ = full.point(p[1], p[2])
+              T.check(math.abs(wx - p[1]) < 1e-6 and math.abs(wy - p[2]) < 1e-6,
+                "Tilt Hybrid inverse and ground projection align")
+              T.check(q > 0 and math.abs(q - fullQ) < 1e-7,
+                "Tilt Hybrid retains Full perspective and actor depth")
+              if zoom == 1 then
+                local fx, fy = full.point(p[1], p[2])
+                if f.constrainX then T.check(math.abs(x - fx) < 1e-6, "100% Tilt constrained horizontal framing matches Full") end
+                if f.constrainY then T.check(math.abs(y - fy) < 1e-6, "100% Tilt constrained vertical framing matches Full") end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  Tilt.angle, Tilt.level = originalAngle, originalLevel
+  for _, degrees in ipairs({ 0, 15, 35, 50 }) do
+    Tilt.angle = math.rad(degrees)
+    for _, b in ipairs({ { x = 32, y = 48, w = 960, h = 160 },
+      { x = 32, y = 48, w = 160, h = 960 }, { x = 32, y = 48, w = 64, h = 64 } }) do
+      for _, size in ipairs({ { 240, 160 }, { 360, 720 }, { 720, 480 } }) do
+        local vw, vh = size[1], size[2]
+        local full = Geometry.project(b, vw, vh, 0, 0, "full", 1, nil, Tilt, large)
+        local l, t, r, bottom = math.huge, math.huge, -math.huge, -math.huge
+        for _, p in ipairs({ { b.x, b.y }, { b.x + b.w, b.y },
+          { b.x + b.w, b.y + b.h }, { b.x, b.y + b.h } }) do
+          local x, y, q = full.point(p[1], p[2])
+          l, r = math.min(l, x - large.left * full.scale * q), math.max(r, x + large.right * full.scale * q)
+          t, bottom = math.min(t, y - large.top * full.scale * q), math.max(bottom, y + large.bottom * full.scale * q)
+        end
+        -- Scroll swaps Hybrid's choice: it scrolls Full's own edge-touching
+        -- (limiting) axis instead of locking it, and locks the other.
+        local xRatio, yRatio = (r - l) / vw, (bottom - t) / vh
+        local tolerance = 1e-7 * math.max(xRatio, yRatio)
+        local scrollsX, scrollsY = xRatio >= yRatio - tolerance, yRatio >= xRatio - tolerance
+        local atStart, atEnd
+        for _, fraction in ipairs({ 0, 0.5, 1 }) do
+          local px, py = b.x + (b.w - 16) * fraction, b.y + (b.h - 16) * fraction
+          local f = Geometry.project(b, vw, vh, px, py, "scroll", 1, nil, Tilt, large)
+          T.eq(f.constrainX, not scrollsX, "Tilt Scroll locks Full's slack axis, not its edge-touching one")
+          T.eq(f.constrainY, not scrollsY, "Tilt Scroll locks Full's slack axis, not its edge-touching one")
+          if scrollsX and scrollsY then
+            T.check(math.abs(f.scale - full.scale) < 1e-6 * full.scale,
+              "Tilt Scroll matches Full's own scale on an exact tie")
+          else
+            T.check(f.scale > full.scale + 1e-6 * full.scale,
+              "Tilt Scroll magnifies beyond Full whenever one axis has genuine room to scroll")
+          end
+          T.check(f.w > 0 and f.h > 0 and f.x >= b.x - 1e-6 and f.y >= b.y - 1e-6
+            and f.x + f.w <= b.x + b.w + 1e-6 and f.y + f.h <= b.y + b.h + 1e-6,
+            "Tilt Scroll never reveals anything past the area's own bounds")
+          if fraction == 0 then atStart = f elseif fraction == 1 then atEnd = f end
+        end
+        if b.w ~= 64 and not (scrollsX and scrollsY) then
+          -- Genuine following, not just a coincidentally in-bounds fixed frame:
+          -- the scrolling axis's pan offset must actually change as the player
+          -- walks across the area, while the locked axis's never budges.
+          -- (Skipped for the tiny 64x64 fixture: against this test's huge
+          -- 128x192 actor envelope, the player's own position range never
+          -- reaches into the theoretically real but envelope-dominated
+          -- scrollable range - an artificial combination, not a real map.)
+          if scrollsX then
+            T.check(math.abs(atStart.dx - atEnd.dx) > 1e-3 * vw, "Tilt Scroll's scrolling axis moves with the player")
+            T.check(math.abs(atStart.dy - atEnd.dy) < 1e-6, "Tilt Scroll's locked axis never moves")
+          else
+            T.check(math.abs(atStart.dy - atEnd.dy) > 1e-3 * vh, "Tilt Scroll's scrolling axis moves with the player")
+            T.check(math.abs(atStart.dx - atEnd.dx) < 1e-6, "Tilt Scroll's locked axis never moves")
+          end
+        end
+      end
+    end
+  end
+  Tilt.angle, Tilt.level = originalAngle, originalLevel
   if not love._staticCameraGpu or not ctx.capture then return end
 
   local lg = love.graphics
@@ -98,6 +205,7 @@ return function(ctx)
   local oldX, oldY = Player.px, Player.py
   local oldImage, oldQuad = ctx.native.image, ctx.native.testQuad
   local oldMode, oldZoom, oldStyle = ctx.settings.mode, ctx.settings.zoom, ctx.settings.zoom_style
+  local oldHybridZoom = ctx.settings.hybrid_zoom
   local pixels = love.image.newImageData(1024, 1024)
   pixels:mapPixel(function(x, y)
     if x >= 16 and x < 32 and y >= 16 and y < 32 then return 0, 1, 0, 1 end
@@ -108,6 +216,7 @@ return function(ctx)
   local quad = lg.newQuad(16, 16, 16, 16, 1024, 1024)
   ctx.native.image, ctx.native.testQuad = image, quad
   ctx.settings.zoom, ctx.settings.zoom_style = 100, "consistent"
+  ctx.settings.hybrid_zoom = 200
   local savedPoint, savedActive = Tilt.groundPoint, Tilt.active
   local savedTranslate = lg.translate
   local priorWorld = ctx.scene.world
@@ -116,13 +225,13 @@ return function(ctx)
   Player.px, Player.py = 320, 240
   for _, degrees in ipairs({ 0, 15, 35, 50 }) do
     Tilt.angle, Tilt.level = math.rad(degrees), 1
-    for _, mode in ipairs({ "full", "partial" }) do
+    for _, mode in ipairs({ "full", "hybrid", "partial" }) do
       ctx.settings.mode = mode
       for _, view in ipairs({ { "screen", 1, 720, 480 }, { "screen", 2, 360, 240 },
         { "retro", 1, 720, 480 } }) do
         local retro = view[1] == "retro"
         local vw, vh, outputScale = retro and 240 or 720, retro and 160 or 480, retro and 3 or 1
-        local f = Geometry.project(bounds, vw, vh, Player.px, Player.py, mode, 1,
+        local f = Geometry.project(bounds, vw, vh, Player.px, Player.py, mode, mode == "hybrid" and 2 or 1,
           mode == "partial" and (retro and 1 or require("src.render.Zoom").scale(3)) or nil, Tilt)
         local depths = { 0.45, 0.85 }
         for i, npc in ipairs({ far, near }) do
@@ -246,6 +355,29 @@ return function(ctx)
     local Field = require("src.core.game3.field_view")
     local billboard = Field._billboard
     local f = Geometry.project(bounds, 720, 480, 200, 300, "full", 1, nil, Tilt)
+    local sampleRaster = lg.newCanvas(640, 480)
+    sampleRaster:setFilter("nearest", "linear")
+    local originalDraw = lg.draw
+    for _, filter in ipairs({ "crisp", "smooth" }) do
+      f.screenFilter = filter
+      local observed
+      lg.draw = function()
+        observed = { sampleRaster:getFilter() }
+        error("injected filtered ground failure")
+      end
+      T.raises(function()
+        render.ground(Renderer, sampleRaster, f, 0, 0, 640, 480)
+      end, "injected filtered ground failure", "filtered ground errors propagate")
+      T.eq(observed[1], filter == "crisp" and "nearest" or "linear",
+        "Tilt ground selects the user's minification filter")
+      T.eq(observed[2], "nearest", "SCREEN ground never softens magnification")
+      local min, mag = sampleRaster:getFilter()
+      T.eq(min, "nearest", "failed projected draw restores texture minification filter")
+      T.eq(mag, "linear", "failed projected draw restores texture magnification filter")
+    end
+    lg.draw = originalDraw
+    f.screenFilter = nil
+    sampleRaster:release()
     lg.push("all")
     T.raises(function()
       render.actors(Tilt, Field, f, 0, 0, function()
@@ -424,6 +556,7 @@ return function(ctx)
   end
   ctx.native.image, ctx.native.testQuad = oldImage, oldQuad
   ctx.settings.mode, ctx.settings.zoom, ctx.settings.zoom_style = oldMode, oldZoom, oldStyle
+  ctx.settings.hybrid_zoom = oldHybridZoom
   Player.px, Player.py = oldX, oldY
   Tilt.angle, Tilt.level = originalAngle, originalLevel
   ctx.capture("screen", 1, 720, 480):release()
