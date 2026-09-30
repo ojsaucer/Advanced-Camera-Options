@@ -36,6 +36,16 @@ function B.new(warn, shade, Scenery)
   local lg = love.graphics
   local canvas, quad, width, height, failed
   local strips, stripKey
+  -- The adapter calls self.resolve() once per drawn frame with no framing of
+  -- its own around it. Without this, EXTRUDE's per-cell scenery
+  -- classification (and GAME's per-cell border lookup) would fully rerun
+  -- every single frame regardless of whether the map, tileset or fill mode
+  -- actually changed since the previous frame. Native's own quads are already
+  -- frame-stable (see tileset_native.lua), so the resolved MID/quad
+  -- assignment plan can be too. Only the drawn cell/MID plan is cached here;
+  -- the backdrop's own assembled render canvases still lazily
+  -- (re)allocate/repaint from that plan exactly as before.
+  local resolveKey, resolveDesc
   local self = {}
   function self.dispose()
     if canvas then canvas:release() end
@@ -46,6 +56,7 @@ function B.new(warn, shade, Scenery)
     end
     strips, stripKey = nil, nil
     canvas, quad, width, height, failed = nil, nil, nil, nil, nil
+    resolveKey, resolveDesc = nil, nil
   end
   -- A walkable boundary tile (plain ground, tall grass, a path, ...) must
   -- never repeat into the void: doing so implies more walkable terrain
@@ -164,10 +175,7 @@ function B.new(warn, shade, Scenery)
       allocationKey = w .. ":" .. h .. ":" .. (content and content.periodX or math.min(w, depth))
         .. ":" .. (content and content.periodY or math.min(h, depth)) .. ":" .. tostring(content ~= nil) }
   end
-  function self.resolve(layout, pair, modeOverride, depth)
-    if modeOverride == "extrude" then return extrude(layout, pair, depth) end
-    local mode = Fill.normalize(Fill.mode)
-    if mode == "black" then self.dispose(); return nil end
+  local function resolveGame(layout, pair, mode)
     local native = Native.get(pair)
     if not native or not native.image then
       self.dispose()
@@ -204,6 +212,44 @@ function B.new(warn, shade, Scenery)
     end
     return { w = w * 16, h = h * 16, cells = cells, native = native,
       key = mode .. ":" .. tostring(pair) .. ":" .. tostring(layout) .. ":" .. w .. ":" .. h }
+  end
+  -- The map/tileset/fill-mode identity alone (never the expensive per-cell
+  -- classification below it) determines whether a previous frame's resolved
+  -- plan is still correct; Map.ensureMidLayout caches midLayout per map def,
+  -- so tostring(layout) is stable across repeat visits to the same map, and
+  -- Native.get(pair) returns the same stable quads for the life of this
+  -- adapter regardless of how many times a cached plan is reused. GAME mode's
+  -- key additionally folds in VoidFill.fillAt's own cheap availability probe
+  -- (it already walks every border MID via hasMid before returning), so an
+  -- atlas whose border tiles become available/unavailable between frames is
+  -- never masked by an otherwise-unchanged (mode, pair, layout) key.
+  function self.resolve(layout, pair, modeOverride, depth)
+    local key
+    if modeOverride == "extrude" then
+      key = "extrude:" .. tostring(pair) .. ":" .. tostring(layout) .. ":" .. tostring(depth or 1)
+    else
+      local mode = Fill.normalize(Fill.mode)
+      if mode == "black" then
+        self.dispose()
+        return nil
+      end
+      local hasMid = function(mid) return Native.hasMid(pair, mid) end
+      local first = Fill.fillAt(mode, 0, 0, hasMid, Fill.primaryFor(pair))
+      key = mode .. ":" .. tostring(pair) .. ":" .. tostring(layout) .. ":" .. tostring(first)
+    end
+    if resolveKey == key and resolveDesc then return resolveDesc end
+    local desc
+    if modeOverride == "extrude" then
+      desc = extrude(layout, pair, depth)
+    else
+      desc = resolveGame(layout, pair, Fill.normalize(Fill.mode))
+    end
+    -- A failed resolution (size/atlas-availability) must keep retrying every
+    -- frame, since the underlying cause (e.g. an atlas still loading
+    -- asynchronously) can clear on a later frame without the key changing.
+    if desc then resolveKey, resolveDesc = key, desc
+    else resolveKey, resolveDesc = nil, nil end
+    return desc
   end
   local function allocate(desc)
     if canvas and width == desc.w and height == desc.h then return end

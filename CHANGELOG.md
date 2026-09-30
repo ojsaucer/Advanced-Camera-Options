@@ -3,6 +3,18 @@
 What's new for players. For implementation and testing details, see the
 [technical reference](docs/TECHNICAL.md).
 
+## 0.16.1
+
+- Fixed a performance regression affecting every camera mode other than
+  NORMAL: the void backdrop (GAME and EXTRUDE) was fully recomputing its
+  entire tile-by-tile plan every single frame, even when the map, tileset
+  and settings hadn't changed since the previous frame. It's now cached and
+  instantly reused across unchanged frames, recomputing only when the map,
+  tileset or relevant settings actually change. Benchmarked at roughly a
+  700-900x reduction in per-frame cost for typical outdoor maps using
+  EXTRUDE, and up to ~1 millisecond saved per frame on a large, mostly-open
+  map.
+
 ## 0.16.0
 
 - Added support for **Pokemon Emerald**. All camera modes, transitions and

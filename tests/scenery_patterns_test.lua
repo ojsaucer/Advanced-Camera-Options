@@ -344,6 +344,12 @@ return function(ctx)
     for _, depth in ipairs({ 1, 2, 8, 16 }) do
       for _, sourceMid in ipairs({ 0x1C, 0x1CB, 0x123, 0x77, 0x21A, 0x06C, 0x04D, 0x298, 0x292, 0x2F5, 0x0D6,
         0x07C, 0x07D, 0x07B, 0x068, 0x06A, 0x10F, 0x117, 0x10B, 0x0FB, 0x00F }) do
+        -- This fixture reuses and mutates a single `layout` table (and the
+        -- closed-over `mid` upvalue its own `midAt` reads) across every
+        -- scenario instead of allocating a fresh one; self.resolve's
+        -- per-frame cache keys on layout identity, so it must be told this is
+        -- unrelated content, exactly as a real map swap would.
+        backdrop.dispose()
         mid = sourceMid
         if mid >= 0x2F5 and mid <= 0x2FF then
           layout.borderWidth, layout.borderHeight, layout.borderMids = 3, 2, safari

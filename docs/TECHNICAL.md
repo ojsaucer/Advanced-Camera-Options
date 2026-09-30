@@ -113,6 +113,11 @@ Unsupported tilesets fall back to the map's border. A small repeating texture
 is rebuilt at integer coordinates for live atlas changes, then projected in
 world space when Tilt is active. It never registers neighboring maps.
 
+`self.resolve()`'s MID/quad assignment plan is cached per map/tileset/fill-mode
+(see 0.16.1 below); only its own assembled render canvases repaint every
+frame for live atlas/animation changes, matching the "rebuilt... for live
+atlas changes" note above.
+
 Uniform forest shade is applied once to each freshly rendered border texture,
 using the native weather renderer. Weather suspension is respected. Global
 compositor fades and veils remain engine-owned.
@@ -754,6 +759,92 @@ the exact expected walkable ground repeating, then restored, following this
 project's established verify-before-finalize practice.
 
 Final validation with actual engine modules on all three tested engines:
+
+| Engine | Headless camera | Real LÖVE camera | Extrusion (GPU) |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 18,336 | 742,733 | 58,416 |
+| 0.3.22 | 18,336 | 742,745 | 58,416 |
+| 0.3.33 (incl. Emerald) | 18,580 | 753,423 | 58,416 |
+
+## 0.16.1 per-frame void backdrop cache
+
+Reported problem: performance felt "highly impacted" by any camera mode other
+than NORMAL. Inspection of `adapter_gen3.lua`'s per-frame draw hook confirmed
+`void_backdrop.lua`'s `self.resolve(layout, pair, modeOverride, depth)` was
+called unconditionally every single frame with **zero memoization** — every
+frame fully recomputed GAME's whole border-cell grid (`Fill.fillAt` +
+`Native.slotFor`/`quad` for every cell, up to 4096) or EXTRUDE's whole
+scenery classification (`Scenery.new` plus `classify`/`classifySource`/
+`mergeCorner` for every boundary cell across all eight regions, now also
+including 0.16.0's walkable-tile fallback search). This was a pre-existing
+gap that the walkable-tile-fallback work made meaningfully worse, since that
+search can cost up to O(edge length) per cell in the worst case (an edge with
+no non-walkable tile anywhere), making the full per-frame recompute up to
+O(edge length²) for that edge alone.
+
+Benchmarked with a disposable LÖVE harness (not committed) directly measuring
+`self.resolve()` call cost, isolated from real asset I/O via the same
+fixture-injection approach the test suite already uses: a representative
+30x20 outdoor route with unrecognized (fallback-triggering) tree/wall
+boundaries cost **~0.30ms per call** fully recomputed vs **~0.0003ms per call**
+cached (roughly **900x**); a deliberately pathological 60x60 fully-open field
+(no non-walkable tile anywhere, forcing every cell's search to scan the
+entire edge) cost **~0.99ms per call** fully recomputed vs **~0.002ms per
+call** cached (roughly **490x**) — nearly 6% of a 60fps frame budget for this
+one piece of logic alone, before any of the mod's other unavoidable per-frame
+work (native raster assembly, projection, shading).
+
+Added a resolve-level cache (`resolveKey`/`resolveDesc` upvalues in
+`void_backdrop.lua`'s `B.new`), keyed cheaply enough to compute every frame
+without materially reducing the win:
+- EXTRUDE: `"extrude:" .. pair .. ":" .. tostring(layout) .. ":" .. depth`.
+  `Map.ensureMidLayout` (map.lua) caches `def.midLayout` once per map def and
+  never recreates it on repeat visits, so `tostring(layout)`'s identity is a
+  fully reliable per-map fingerprint in real gameplay; `Native.get(pair)`
+  likewise returns the same stable, forever-cached table for a pair's whole
+  loaded lifetime (tileset_native.lua), so quads embedded in a cached `desc`
+  never go stale.
+- GAME: `mode .. ":" .. pair .. ":" .. tostring(layout) .. ":" .. tostring(first)`,
+  where `first` is `VoidFill.fillAt(mode, 0, 0, hasMid, primary)` — the exact
+  same cheap availability probe `resolveGame` already computed first, which
+  itself already walks every border MID via `hasMid` before returning
+  (`void_fill.lua`). Folding `first` into the key (not just mode+pair+layout)
+  means an atlas whose border tiles become available/unavailable is never
+  masked by an otherwise-unchanged key, at the cost of one extra cheap O(1)
+  probe per frame even on a cache hit.
+
+A failed resolution (size limits, unavailable atlas) is deliberately **never**
+cached, so a transient failure (e.g. an atlas still loading asynchronously)
+keeps retrying every frame exactly as before, instead of being permanently
+stuck once first observed. `self.dispose()` — already called by the adapter
+whenever the fill mode becomes BLACK, and by both resolve paths on their own
+failure branches — now also clears the cache, so any path that already
+signals "start fresh" does so consistently.
+
+This is safe against `desc` mutation after caching: `self.draw()` only reads
+from the returned table (`.cells`, `.mode`, `.regions`, `.native`, `.key`),
+never writes to it: the earlier per-cell audit that established this file's
+existing seam/state-restoration guarantees was re-checked line by line for
+the same guarantee.
+
+This is **not** safe against a shared mock `layout` table whose fields (or
+closures over an external mutable upvalue) change between calls without its
+own object identity changing — a purely test-authoring concern, since real
+map layouts are always fresh, stable objects per map. One existing test
+(`tests/scenery_patterns_test.lua`'s GPU section) reused a single mock
+`layout` object across many different simulated boundary/border scenarios by
+mutating its fields and a closed-over `mid` variable in place, without ever
+constructing a new layout table; this collided with the new cache and was
+fixed with a single `backdrop.dispose()` call at the top of that loop's each
+iteration — the same explicit "forget cached state, this is unrelated
+content" signal a real hot-reload or map-editing scenario would need too.
+Confirmed by reverting the cache temporarily and re-running: this test
+failure reproduces exactly as expected without the fix, and the fix resolves
+it without changing what the test verifies.
+
+Final validation with actual engine modules on all three tested engines
+(no headless-suite regression; GPU suite fully re-verified since the fix
+touches per-frame rendering behavior directly):
 
 | Engine | Headless camera | Real LÖVE camera | Extrusion (GPU) |
 | --- | ---: | ---: | ---: |
