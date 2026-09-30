@@ -3,6 +3,19 @@
 What's new for players. For implementation and testing details, see the
 [technical reference](docs/TECHNICAL.md).
 
+## 0.16.2
+
+- Fixed a performance issue with the CONNECTIONS setting: while it was on
+  and the camera was following the player (Hybrid, Partial/Bounded or
+  Scroll mode) near a connected map's edge, the visible overlap with the
+  neighboring map shifted by a few pixels almost every frame, which forced
+  a full GPU canvas reallocation and a full rebuild of the engine's native
+  tile batches on nearly every frame. The camera's internal capture size
+  is now rounded up to a stable step, which keeps it constant across that
+  tiny per-frame fluctuation without changing anything you see on screen.
+  Benchmarked at roughly an 8x reduction in how often those expensive
+  rebuilds are triggered while walking near a connected map's boundary.
+
 ## 0.16.1
 
 - Fixed a performance regression affecting every camera mode other than

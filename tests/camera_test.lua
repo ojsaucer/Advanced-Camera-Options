@@ -2,6 +2,12 @@
 local root = assert(arg[1], "Pass the Static Camera directory")
 package.path = package.path .. ";./?.lua;./?/init.lua"
 local T = require("tests.modkit")
+-- adapter_gen3.lua rounds the assembled native-raster capture size up to a
+-- stable step so connected-neighbor overlap and per-frame player tracking
+-- don't force a full canvas/sprite-batch rebuild on every tiny fluctuation.
+-- Every exact seen.w/seen.h assertion below reflects that same rounding,
+-- reusing the adapter's own helper so the tests can never drift from it.
+local roundUpCapture = assert(loadfile(root .. "\\adapter_gen3.lua"))().roundUpCapture
 local files = {}
 for _, name in ipairs({ "manifest.json", "main.lua", "geometry.lua", "adapter_gen3.lua",
   "settings_help.lua", "tilt_geometry.lua", "tilt_render.lua", "void_backdrop.lua", "scenery_patterns.lua", "boundary_shading.lua",
@@ -324,8 +330,8 @@ for _, version in ipairs(versions) do
   local x, y, z = game:draw()
   T.eq(x, "draw", "return value")
   T.eq(z, 7, "nil-containing tuple")
-  T.eq(seen.w, 643, "actual FieldView full width plus raster guards")
-  T.eq(seen.h, 483, "actual FieldView full height plus raster guards")
+  T.eq(seen.w, roundUpCapture(643), "actual FieldView full width plus raster guards")
+  T.eq(seen.h, roundUpCapture(483), "actual FieldView full height plus raster guards")
   T.eq(#seen.world, 1, "no adjacent maps during rendering")
   T.eq(seen.world[1].id, "FIXTURE", "current map only")
   T.eq(Map.world, world, "connected world restored")
@@ -353,41 +359,41 @@ for _, version in ipairs(versions) do
   end
   settings.framing, settings.padding = "reachable", 0
   game:draw()
-  T.eq(seen.w, 115, "setting switches to tighter crop plus guards")
-  T.eq(seen.h, 99, "crop excludes exterior decoration plus guards")
+  T.eq(seen.w, roundUpCapture(115), "setting switches to tighter crop plus guards")
+  T.eq(seen.h, roundUpCapture(99), "crop excludes exterior decoration plus guards")
   local pan = seen.panX
   P.px = 96
   game:draw()
-  T.eq(seen.w, 115, "walking keeps crop fixed")
+  T.eq(seen.w, roundUpCapture(115), "walking keeps crop fixed")
   T.eq(seen.panX - pan, -16, "cancels player following")
   P.px = 80
   settings.padding = 1
   game:draw()
-  T.eq(seen.w, 147, "crop padding setting applied")
+  T.eq(seen.w, roundUpCapture(147), "crop padding setting applied")
   settings.framing = "scene"
   game:draw()
-  T.eq(seen.w, 643, "full-scene toggle restores authored bounds plus guards")
+  T.eq(seen.w, roundUpCapture(643), "full-scene toggle restores authored bounds plus guards")
   settings.mode = "partial"
   game:draw()
-  T.eq(seen.w, 123, "default consistent 200 percent captures half normal width plus guards")
+  T.eq(seen.w, roundUpCapture(123), "default consistent 200 percent captures half normal width plus guards")
   settings.zoom = 100
   game:draw()
-  T.eq(seen.w, 243, "consistent 100 percent matches normal logical scale plus guards")
+  T.eq(seen.w, roundUpCapture(243), "consistent 100 percent matches normal logical scale plus guards")
   settings.zoom = 50
   game:draw()
-  T.eq(seen.w, 483, "consistent 50 percent shows twice normal width plus guards")
+  T.eq(seen.w, roundUpCapture(483), "consistent 50 percent shows twice normal width plus guards")
   settings.zoom = 5
   game:draw()
-  T.eq(seen.w, 643, "5 percent stops at area boundary plus cropped-out guards")
+  T.eq(seen.w, roundUpCapture(643), "5 percent stops at area boundary plus cropped-out guards")
   settings.zoom = 800
   game:draw()
-  T.eq(seen.w, 123, "legacy 800 percent is capped to 200 percent")
+  T.eq(seen.w, roundUpCapture(123), "legacy 800 percent is capped to 200 percent")
   settings.zoom = 1
   game:draw()
-  T.eq(seen.w, 643, "legacy subminimum is clamped upward, not reset to close zoom")
+  T.eq(seen.w, roundUpCapture(643), "legacy subminimum is clamped upward, not reset to close zoom")
   settings.zoom_style, settings.zoom = "relative", 200
   game:draw()
-  T.eq(seen.w, 363, "area-relative toggle preserves previous fit-based zoom plus guards")
+  T.eq(seen.w, roundUpCapture(363), "area-relative toggle preserves previous fit-based zoom plus guards")
   settings.zoom_style = "consistent"
   game:draw()
   T.check(seen.w < 640 and seen.h < 480, "closer bounded render")
@@ -410,8 +416,8 @@ for _, version in ipairs(versions) do
       game:draw()
       local f = G.project({ x = 0, y = 0, w = 640, h = 480 }, 240, 160,
         P.px, P.py, "hybrid", expectedZoom)
-      T.eq(seen.w, math.ceil(f.w) + 3, "Hybrid renderer captures moving primary width with guards")
-      T.eq(seen.h, math.ceil(f.h) + 3, "Hybrid renderer captures moving primary height with guards")
+      T.eq(seen.w, roundUpCapture(math.ceil(f.w) + 3), "Hybrid renderer captures moving primary width with guards")
+      T.eq(seen.h, roundUpCapture(math.ceil(f.h) + 3), "Hybrid renderer captures moving primary height with guards")
       T.eq(seen.panX, math.floor(f.x) - 1 - math.floor(P.px + 8 - seen.w / 2),
         "Hybrid native capture alignment follows player without mutating position")
     end

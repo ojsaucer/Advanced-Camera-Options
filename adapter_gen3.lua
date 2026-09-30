@@ -9,6 +9,21 @@ function Adapter.withinCanvasBudget(w, h, rasterW, rasterH, upright, backdropPix
   end
   return w * h * (upright and 4 or 3) + pixels + (backdropPixels or 0) <= 32 * 1024 * 1024
 end
+-- Connected-neighbor terrain overlap (and, in Hybrid/Bounded/Scroll, the
+-- player's own following position) shifts the exact capture rectangle by
+-- a few pixels essentially every frame near a map edge. Without this, that
+-- constant sub-tile fluctuation would force a full GPU canvas reallocation
+-- (ensureRaster) and a full native sprite-batch rebuild (clearCache) nearly
+-- every frame. cameraPanX/Y's formula keeps the raster's world-space origin
+-- exactly captureX/captureY regardless of captureW/H's value, and the
+-- scissor-clipped/coverage-clamped draw and UV math below already restrict
+-- what's shown to each rect's real terrain bounds, so rounding the
+-- allocated size up to a stable step never reveals extra content; it only
+-- stops that reallocation/rebuild from re-triggering on every tiny shift.
+Adapter.CAPTURE_STEP = 32
+function Adapter.roundUpCapture(n)
+  return math.ceil(n / Adapter.CAPTURE_STEP) * Adapter.CAPTURE_STEP
+end
 local function pack(...) return { n = select("#", ...), ... } end
 local function result(r)
   if not r[1] then error(r[2], 0) end
@@ -102,6 +117,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
   local function release(object)
     if object then object:release() end
   end
+  local roundUpCapture = Adapter.roundUpCapture
   local cacheKeys = { "_nativeBatches", "_nativeOverBatches", "_nativeOverByRow",
     "_nativeBx", "_nativeBy", "_nativePair", "_nativeOverPair", "_nativeVoid",
     "_nativeDirty", "_nativeOverOx", "_nativeOverOy", "_nativeCellsByPair", "_nativeCellPool" }
@@ -471,7 +487,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       -- Assemble packed atlas tiles at integer 1:1 coordinates, as vanilla does.
       -- Guard texels cover fractional camera movement before the final crop.
       local captureX, captureY = math.floor(captureBounds.x) - 1, math.floor(captureBounds.y) - 1
-      local captureW, captureH = math.ceil(captureBounds.w) + 3, math.ceil(captureBounds.h) + 3
+      local captureW = roundUpCapture(math.ceil(captureBounds.w) + 3)
+      local captureH = roundUpCapture(math.ceil(captureBounds.h) + 3)
       local nativeFlip = screen and Renderer.mirrorsWorldOverride and Renderer.mirrorsWorldOverride()
       local rasterOK, rasterError = pcall(function()
         if not tilted and not nativeFlip and upright then release(upright); upright = nil end

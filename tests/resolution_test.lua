@@ -81,7 +81,7 @@ return function(ctx)
   settings.mode = "full"
   local allocate = lg.newCanvas
   lg.newCanvas = function(w, h, ...)
-    if w == 643 then error("injected world raster allocation failure") end
+    if w == Adapter.roundUpCapture(643) then error("injected world raster allocation failure") end
     return allocate(w, h, ...)
   end
   T.eq(render(), nil, "world raster failure does not publish an incomplete image")
@@ -341,7 +341,7 @@ return function(ctx)
               end
               local worldWidth = resolution == "screen" and view[1] * view[2] / expected
                 or Renderer.worldCanvas:getWidth() / (zoom / 100)
-              T.eq(ctx.seen.w, math.ceil(worldWidth) + 3,
+              T.eq(ctx.seen.w, Adapter.roundUpCapture(math.ceil(worldWidth) + 3),
                 "GPU: exact zoom captures correct world extent plus cropped guards")
               pixels:release()
             end
@@ -354,19 +354,19 @@ return function(ctx)
     for _, resolution in ipairs({ "retro", "screen" }) do
       scene.data.maps.FIXTURE, settings.zoom = ctx.def, 50
       capture(resolution, 1, 720, 480):release()
-      T.eq(ctx.seen.w, 483, "GPU: half zoom captures twice normal width plus guards")
+      T.eq(ctx.seen.w, Adapter.roundUpCapture(483), "GPU: half zoom captures twice normal width plus guards")
       scene.data.maps.FIXTURE, settings.zoom = large, 25
       capture(resolution, 1, 720, 480):release()
-      T.eq(ctx.seen.w, 963, "GPU: quarter zoom works on a sufficiently large area")
+      T.eq(ctx.seen.w, Adapter.roundUpCapture(963), "GPU: quarter zoom works on a sufficiently large area")
       settings.zoom = 5
       capture(resolution, 1, 720, 480):release()
-      T.eq(ctx.seen.w, 1283, "GPU: minimum zoom respects map width plus cropped guards")
+      T.eq(ctx.seen.w, Adapter.roundUpCapture(1283), "GPU: minimum zoom respects map width plus cropped guards")
     end
     settings.zoom = 100
     scene.data.maps.FIXTURE = small
     for _, resolution in ipairs({ "retro", "screen" }) do
       local pixels = capture(resolution, 1, 720, 480)
-      T.eq(ctx.seen.w, 131, "GPU: small area raises zoom only enough to fit width plus guards")
+      T.eq(ctx.seen.w, Adapter.roundUpCapture(131), "GPU: small area raises zoom only enough to fit width plus guards")
       T.check(ctx.seen.h <= 128, "GPU: small-area viewport stays inside height")
       for _, point in ipairs({ { 0, 0 }, { 719, 0 }, { 0, 479 }, { 719, 479 } }) do
         local r, green, blue = pixels:getPixel(point[1], point[2])
@@ -378,10 +378,10 @@ return function(ctx)
     for _, resolution in ipairs({ "retro", "screen" }) do
       scene.data.maps.FIXTURE = ctx.def
       capture(resolution, 1, 720, 480):release()
-      T.eq(ctx.seen.w, 363, "GPU: legacy zoom preserves medium-area view plus guards")
+      T.eq(ctx.seen.w, Adapter.roundUpCapture(363), "GPU: legacy zoom preserves medium-area view plus guards")
       scene.data.maps.FIXTURE = large
       capture(resolution, 1, 720, 480):release()
-      T.eq(ctx.seen.w, 723, "GPU: legacy zoom retains area-relative scaling plus guards")
+      T.eq(ctx.seen.w, Adapter.roundUpCapture(723), "GPU: legacy zoom retains area-relative scaling plus guards")
     end
     Zoom.offset = oldOffset
     settings.zoom_style, settings.mode = "consistent", "full"

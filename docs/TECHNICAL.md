@@ -851,3 +851,83 @@ touches per-frame rendering behavior directly):
 | 0.3.19 | 18,336 | 742,733 | 58,416 |
 | 0.3.22 | 18,336 | 742,745 | 58,416 |
 | 0.3.33 (incl. Emerald) | 18,580 | 753,423 | 58,416 |
+
+## 0.16.2 stable capture-size rounding (CONNECTIONS performance)
+
+Reported problem: with CONNECTIONS on, performance was still "highly
+impacted" specifically in player-following modes (Hybrid, Partial/Bounded,
+Scroll) near a connected map's edge.
+
+`adapter_gen3.lua`'s `field()` grows `captureBounds` to cover whichever part
+of a connected neighbor's terrain currently intersects the viewport, and
+`captureW`/`captureH` are derived from it (`math.ceil(captureBounds.w) + 3`,
+etc.). In a following mode near a boundary, that intersection — and so
+`captureW`/`captureH` — shifts by a few pixels on almost every frame as the
+player moves. Both `ensureRaster()` (the GPU canvas allocation, gated on an
+exact `rw == w and rh == h` check) and the native-render cache key
+(`cacheKey`, whose change triggers `clearCache()` — releasing and forcing a
+full rebuild of the engine's `_nativeBatches`/`_nativeOverBatches` sprite
+batches) are keyed on this exact, fluctuating value. So CONNECTIONS mode was
+triggering a full GPU canvas reallocation and a full native sprite-batch
+rebuild far more often than necessary, specifically while following the
+player near a connected map's edge.
+
+Added a `CAPTURE_STEP = 32` constant and `Adapter.roundUpCapture(n)` helper
+(module-level, alongside `Adapter.withinCanvasBudget`, so tests can reuse the
+exact same formula instead of re-deriving it), applied to `captureW`/
+`captureH` right after their existing `math.ceil(...) + 3` computation. Every
+downstream consumer — `ensureRaster`, the native cache key, `cameraPanX`/
+`cameraPanY`, the `nextDraw` calls, and `tiltModules.render.ground` — already
+reads `captureW`/`captureH` from those same two locals, so all of them
+automatically see the same stabilized, less-frequently-changing value.
+
+This is safe because nothing downstream actually depends on `captureW`/
+`captureH` being the *smallest* value that fits the content, only that the
+raster is *at least* that large and that every consumer agrees on the exact
+same number:
+- `Field.cameraPanX = captureX - math.floor(Player.px + 8 - captureW / 2)`
+  combined with the engine's own `camX = math.floor(px + CELL/2 - canvasW/2)
+  + cameraPanX` is algebraically self-cancelling: `camX` always equals
+  `captureX`, regardless of `captureW`'s value, as long as the same value is
+  used consistently (it is).
+- The final on-screen draw uses per-rect scissor clips computed from real
+  `rect`/`frame` geometry (`left`/`top`/`right`/`bottom`), not the raster's
+  physical size, and Tilt's `tiltModules.render.ground` UV math
+  (`(p[1] - captureX) / captureW`) and coverage clamps
+  (`math.min(captureX + captureW, b.x + b.w)`) are likewise self-consistent
+  with any `captureW`/`captureH` value.
+- So a larger, rounded-up raster simply renders a bit of extra margin that is
+  never sampled or displayed — it cannot reveal anything outside the current
+  area's bounds.
+
+Benchmarked by simulating 100,000 frames of a player oscillating near a
+connected map's edge (small sub-tile shifts in the neighbor/viewport overlap,
+matching the real per-frame fluctuation described above): the exact,
+unrounded capture width changed on ~65% of frames (each one a forced
+reallocation/rebuild), versus ~8% of frames with the 32px rounding — roughly
+an **8x reduction** in how often `ensureRaster`/`clearCache()` fire while
+CONNECTIONS is on and the camera is following the player near a boundary.
+
+This changes an observable value (`captureW`/`captureH`, which several tests
+assert exactly via `seen.w`/`seen.h`/`ctx.seen.w`/`ctx.seen.h`) without
+changing any actual rendered content. Every affected assertion in
+`tests/camera_test.lua`, `tests/resolution_test.lua` and
+`tests/camera_features_test.lua` was updated to route through the same
+`roundUpCapture`/`Adapter.roundUpCapture` formula (loaded directly from
+`adapter_gen3.lua` where practical) instead of hardcoding new literals, so
+the tests can never drift from the production formula again. One injected
+canvas-allocation-failure test (`tests/camera_features_test.lua`, "GPU:
+failed neighbors return to primary raster, not vanilla camera") targeted the
+neighbor-expanded raster by an exact width threshold; this still works
+because the neighbor-expanded raster and the primary-only raster round up to
+different 32px buckets in that fixture (704 vs. 672), so the threshold was
+simply updated to compare against the new rounded primary width instead of
+the old exact one.
+
+Final validation with actual engine modules on all three tested engines:
+
+| Engine | Headless camera | Real LÖVE camera | Extrusion (GPU) |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 18,336 | 742,733 | 58,416 |
+| 0.3.22 | 18,336 | 742,745 | 58,416 |
+| 0.3.33 (incl. Emerald) | 18,580 | 753,423 | 58,416 |

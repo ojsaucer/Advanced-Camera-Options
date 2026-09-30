@@ -8,6 +8,7 @@ return function(ctx)
   local Native = require("src.core.game3.tileset_native")
   local Tilt = require("src.render.Tilt")
   local Geometry = assert(loadfile(ctx.root .. "\\tilt_geometry.lua"))()
+  local Adapter = assert(loadfile(ctx.root .. "\\adapter_gen3.lua"))()
   local Battle = ctx.nativeBattle
   local battleProxy = require("src.core.game3.battle_transition")
   local originalSettings = {}
@@ -335,7 +336,10 @@ return function(ctx)
         end
         local allocate = lg.newCanvas
         lg.newCanvas = function(w, h, ...)
-          if w > 643 and w ~= 720 then error("injected neighbor raster allocation failure") end
+          -- Rounding the capture size to a stable step (see adapter_gen3.lua)
+          -- shifts the primary-only baseline up too, so compare against the
+          -- rounded primary width rather than the old exact literal.
+          if w > Adapter.roundUpCapture(643) and w ~= 720 then error("injected neighbor raster allocation failure") end
           return allocate(w, h, ...)
         end
         -- Force reallocation of the expanded optional raster.
@@ -350,7 +354,7 @@ return function(ctx)
         if resolution == "screen" then
           T.check(publications >= 2, "GPU: neighbor failure does not downgrade Screen resolution")
         end
-        T.eq(ctx.seen.w, 643, "GPU: failed neighbors return to primary raster, not vanilla camera")
+        T.eq(ctx.seen.w, Adapter.roundUpCapture(643), "GPU: failed neighbors return to primary raster, not vanilla camera")
         fallback:release()
         settings.connected = false
         ctx.capture(resolution, 1, 720, 480):release()
