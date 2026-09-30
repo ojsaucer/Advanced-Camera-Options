@@ -343,8 +343,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       if backdrop then
         if fill == "game" then border = backdrop.resolve(layout, def.pair or layout.pair)
         elseif fill == "extrude" then
-          border = backdrop.resolve(layout, def.pair or layout.pair, "extrude",
-            math.floor(number("extrude_depth", 1, 1, 16)))
+          border = backdrop.resolve(layout, def.pair or layout.pair, "extrude", 1)
         else backdrop.dispose() end
       end
       backdropPixels = border and (border.pixels or border.w * border.h) or 0
@@ -379,8 +378,7 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
       end
       local signature = table.concat({ mode, framing, number("padding", 1, 0, 4),
         tilted and Tilt.angle or "flat", referenceScale or "relative", zoomLevel(mode), fill,
-        maxScale or "uncapped", fill == "extrude" and number("extrude_depth", 1, 1, 16) or 0,
-        screenFilter or "retro" }, ":")
+        maxScale or "uncapped", screenFilter or "retro" }, ":")
       if projectionKey ~= signature then
         valid, area, motion, presentation.crossing = nil, nil, nil, nil
       end
@@ -816,7 +814,8 @@ function Adapter.start(mod, G, tiltModules, Backdrop, compatibility)
   update = function(nextUpdate, game, dt)
     local r = pack(nextUpdate(game, dt))
     local version = GameVersion.get()
-    if not compatibility.allowed() or (version ~= "firered" and version ~= "leafgreen") or not game then dispose()
+    if not compatibility.allowed()
+      or (version ~= "firered" and version ~= "leafgreen" and version ~= "emerald") or not game then dispose()
     elseif not attachment or attachment.game ~= game then
       dispose()
       if type(game.draw) == "function" and type(game.reset) == "function" then

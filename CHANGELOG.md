@@ -3,6 +3,27 @@
 What's new for players. For implementation and testing details, see the
 [technical reference](docs/TECHNICAL.md).
 
+## 0.16.0
+
+- Added support for **Pokemon Emerald**. All camera modes, transitions and
+  settings work the same as on FireRed/LeafGreen.
+- Removed the EXTRUDE DEPTH setting. Unrecognized scenery now always repeats
+  a single boundary tile outward, which looks more polished than the deeper
+  multi-row repeat the old setting allowed.
+- Fixed EXTRUDE repeating walkable ground (plain grass, tall grass, paths)
+  into the backdrop, which looked like more walkable area existed past the
+  map's actual edge. It now substitutes the nearest non-walkable boundary
+  tile (a fence, tree, wall or water tile) found along that same edge instead.
+- EXTRUDE now also completes Emerald's own General-tileset trees as whole
+  patterns (verified against Littleroot Town, Oldale Town, Route 101 and
+  Petalburg Woods), using Emerald's own tileset artwork independently of
+  FireRed/LeafGreen's. Other Emerald scenery (rocks, water, fences, walls)
+  still uses plain edge-tile repetition for now.
+- Recognized additional fence and guardrail pieces (including Route 11's
+  bridge railing) in FireRed/LeafGreen's EXTRUDE.
+- Verified against Gen1Recomp 0.3.33, the first engine build with Emerald
+  support; it's now a tested engine version alongside 0.3.19 and 0.3.22.
+
 ## 0.15.0
 
 - Added SCROLL (Full-Scroll) mode: zoom in until the area's shorter dimension

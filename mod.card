@@ -1,10 +1,10 @@
 return {
-  summary = "Full, Full-Scroll, Hybrid and Bounded cameras, Tilt and adjustable zoom for FireRed and LeafGreen.",
+  summary = "Full, Full-Scroll, Hybrid and Bounded cameras, Tilt and adjustable zoom for FireRed, LeafGreen and Emerald.",
   author = "Static Camera contributors",
   contact = "https://github.com/ojsaucer/Advanced-Camera-Options",
   tags = { "camera", "ui", "gen3", "tilt" },
   differences = {
-    changed = { "Optional Full, Full-Scroll, Hybrid and Bounded cameras for FireRed and LeafGreen." },
+    changed = { "Optional Full, Full-Scroll, Hybrid and Bounded cameras for FireRed, LeafGreen and Emerald." },
     added = { "FULL shows the whole area; FULL-SCROLL uses Full's fit but scrolls its one non-edge-touching axis; HYBRID zooms in with one-axis constraints; BOUNDED follows within all edges; NORMAL restores the game camera.",
       "Hybrid zoom from 100-200% of Full's fit; follows freely on Full's non-edge-touching axis.",
       "Adjustable Bounded zoom from 5-200% in 5% steps.",
@@ -15,12 +15,14 @@ return {
       "SCREEN rendering for clearer zoomed-out views without enlarging menus.",
       "SCREEN FILTER keeps crisp pixels by default, with optional Smooth filtering when zoomed out.",
       "Optional backgrounds that follow the game's Void Fill, Tilt and forest shade.",
-      "EXTRUDE completes recognized trees and extends ocean water; unknown scenery uses 1-16 tile edge strips.",
+      "EXTRUDE completes recognized trees (FireRed/LeafGreen and Emerald), plus rocks, water and shorelines "
+        .. "on FireRed/LeafGreen; unrecognized scenery substitutes the nearest non-walkable boundary tile "
+        .. "instead of repeating walkable ground into the void.",
       "Viridian Forest uses its own tree pattern; buildings extend as trees and wall corners continue as oriented walls.",
       "Fade or direction-aware Slide transitions, with adjustable duration.",
       "Stable camera framing through ordinary battle-entry effects.",
       "Terrain cropping, padding, Select-help and Start-preview in in-game options." },
-    known = { "Tested on Gen1Recomp 0.3.19 and 0.3.22; requires API 2 and engine_internals permission.",
+    known = { "Tested on Gen1Recomp 0.3.19, 0.3.22 and 0.3.33; requires API 2 and engine_internals permission.",
       "Other stable 0.3.x versions from 0.3.19 need UNTESTED ENGINE > TRY and may not work.",
       "With Bounded and Tilt, the player can leave view at either bottom corner.",
       "With MAX ZOOM off, small areas enforce a minimum zoom to avoid outside space.",
@@ -29,9 +31,11 @@ return {
       "Battle-entry effects temporarily use native pixel resolution. Menu previews approximate SCREEN sharpness.",
       "Connected scenery is omitted when its larger image cannot fit; the primary camera is retained.",
       "Connected scenery shows terrain only, without neighboring NPC sprites.",
-      "Content-aware extrusion recognizes selected General-tileset families; other scenery uses strip fallback. Interiors stay black.",
+      "Content-aware extrusion recognizes trees on both FireRed/LeafGreen and Emerald, using each game's own "
+        .. "artwork; other FireRed/LeafGreen General-tileset families (rocks, water, fences, walls) are also "
+        .. "recognized, but not yet on Emerald. Unrecognized scenery uses strip fallback. Interiors stay black.",
       "Void Fill is decorative. Local fog, rain and cave-light effects are not repeated into it.",
-      "Gen 1/2 are planned; Ruby/Sapphire/Emerald and other camera-replacement mods are not supported.",
+      "Gen 1/2 are planned; Ruby/Sapphire and other camera-replacement mods are not supported.",
       "On 0.3.22, fully restart the launcher before retrying a failed mod installation." },
   },
   credits = { { who = "Astra", for_ = "Primary AI development assistance, with human direction and in-game feedback." } },

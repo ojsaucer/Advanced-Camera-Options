@@ -1,6 +1,6 @@
 local C = {}
 
-local tested = { ["0.3.19"] = true, ["0.3.22"] = true }
+local tested = { ["0.3.19"] = true, ["0.3.22"] = true, ["0.3.33"] = true }
 local groups = {
   camera = {
     { "src.mods.Runtime", hooks = "table" },

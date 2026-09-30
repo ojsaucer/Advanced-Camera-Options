@@ -1,7 +1,8 @@
 local S = {}
 
 -- General-primary metatile IDs, not packed atlas slots. These families were
--- checked against the imported FRLG under/over artwork.
+-- checked against the imported FRLG under/over artwork and are gated to the
+-- "frlg" ROM layout below; Emerald's own separate rules are further down.
 local water = {}
 for _, mid in ipairs({ 0x110, 0x111, 0x118, 0x119, 0x1CB, 0x1CC, 0x1D3, 0x1D4,
   0x12B, 0x1D0, 0x1D1, 0x1D2, 0x1D8, 0x1D9, 0x1E0, 0x1E2,
@@ -27,7 +28,10 @@ local treeRows = {
 }
 local fences = {}
 for _, mid in ipairs({
-  0x0D6, 0x0D7, 0x0E6, 0x0E7, 0x0E8, 0x0E9, 0x0EC, 0x0ED, 0x0EE,
+  0x0D6, 0x0D7, 0x0E6, 0x0E7, 0x0E8, 0x0E9, 0x0EC, 0x0ED, 0x0EE, 0x0F4,
+  -- Guardrail/handrail posts (e.g. Route 11's bridge, Rock Tunnel/Victory
+  -- Road entrances): same "self-repeat" treatment as wooden fence posts.
+  0x29B, 0x29C, 0x2D3,
   0x315, 0x316, 0x317, 0x31D, 0x320, 0x325, 0x326, 0x327,
 }) do fences[mid] = true end
 for _, mid in ipairs({ 0x044, 0x045, 0x046, 0x048, 0x049, 0x04A, 0x04B, 0x04C, 0x04D, 0x04E,
@@ -53,7 +57,25 @@ local function gcd(a, b)
   return a
 end
 
+-- Most of these metatile IDs were verified against FireRed/LeafGreen's own
+-- "General" tileset artwork; Emerald ships a completely different ROM with a
+-- same-named "general" primary tileset that has no relation to these exact
+-- IDs, so applying FRLG-specific rules there would replace tiles with
+-- unrelated, wrong artwork. `family()` reports which ROM's layout is active
+-- so each rule table below can be scoped to the one game it was verified
+-- against. Older engines (0.3.19/0.3.22) predate GameVersion.layout entirely
+-- and only ever shipped frlg-layout games.
+local function family()
+  local ok, GameVersion = pcall(require, "src.core.GameVersion")
+  if not ok or type(GameVersion.layout) ~= "function" then return "frlg" end
+  local ok2, layout = pcall(GameVersion.layout, GameVersion.get())
+  if not ok2 or layout == nil then return "frlg" end
+  return layout
+end
+
 function S.new(layout, pair, Fill, Native, depth)
+  local fam = family()
+  if fam ~= "frlg" and fam ~= "rse" then return nil end
   if not Fill.primaryFor or Fill.primaryFor(pair) ~= "general"
     or not Fill.borderFor or not Native.hasMid then return nil end
   local function available(p)
@@ -64,11 +86,11 @@ function S.new(layout, pair, Fill, Native, depth)
     return p
   end
   local trees, ocean = available(Fill.borderFor("trees")), available(Fill.borderFor("water"))
-  local motifDefs = {
+  local motifDefs = fam == "frlg" and {
     { name = "forest", mids = forestBorder, gates = forestGate },
     { name = "patternBush", mids = patternBushBorder },
     { name = "safari", mids = safariBorder },
-  }
+  } or {}
   local borderPattern
   if layout.borderWidth == 3 and layout.borderHeight == 2 and layout.borderMids then
     for _, def in ipairs(motifDefs) do
@@ -96,7 +118,7 @@ function S.new(layout, pair, Fill, Native, depth)
       end
       phases[mid] = { (i - 1) % trees.w, math.floor((i - 1) / trees.w) }
     end
-    if trees and trees.w == 2 and trees.h == 2
+    if trees and fam == "frlg" and trees.w == 2 and trees.h == 2
       and trees.mids[1] == 0x1C and trees.mids[2] == 0x1D
       and trees.mids[3] == 0x14 and trees.mids[4] == 0x15 then
       phases[0x0C], phases[0x0D] = { 0, 0 }, { 1, 0 }
@@ -105,6 +127,18 @@ function S.new(layout, pair, Fill, Native, depth)
       phases[0x16], phases[0x17] = { 0, 1 }, { 1, 1 }
       phases[0x1E], phases[0x1F] = { 0, 0 }, { 1, 0 }
       phases[0x26], phases[0x27] = { 0, 1 }, { 1, 1 }
+    end
+    -- Emerald's own General tree quadrant (verified against Littleroot Town/
+    -- Oldale Town/Route 101/Petalburg Woods' authored border). A second,
+    -- visually distinct canopy variant sits at the same relative quadrant
+    -- offsets one column over in the atlas and completes the same way.
+    if trees and fam == "rse" and trees.w == 2 and trees.h == 2
+      and trees.mids[1] == 0x1D4 and trees.mids[2] == 0x1D5
+      and trees.mids[3] == 0x1DC and trees.mids[4] == 0x1DD
+      and Native.hasMid(pair, 0x1D6) and Native.hasMid(pair, 0x1D7)
+      and Native.hasMid(pair, 0x1DE) and Native.hasMid(pair, 0x1DF) then
+      phases[0x1D6], phases[0x1D7] = { 0, 0 }, { 1, 0 }
+      phases[0x1DE], phases[0x1DF] = { 0, 1 }, { 1, 1 }
     end
   end
   local borderPhases = {}
@@ -122,8 +156,8 @@ function S.new(layout, pair, Fill, Native, depth)
     end
   end
   local w, h = layout.width, layout.height
-  local coastAvailable = ocean and Native.hasMid(pair, 0x12B)
-  local completeCrown = trees and Native.hasMid(pair, 0x0FA) and Native.hasMid(pair, 0x0FB)
+  local coastAvailable = fam == "frlg" and ocean and Native.hasMid(pair, 0x12B)
+  local completeCrown = fam == "frlg" and trees and Native.hasMid(pair, 0x0FA) and Native.hasMid(pair, 0x0FB)
   local function at(p, x, y) return p.mids[(y % p.h) * p.w + x % p.w + 1] end
   local function period(size, axis)
     local p = math.min(size, depth)
@@ -164,7 +198,7 @@ function S.new(layout, pair, Fill, Native, depth)
     local motif = borderPattern and borderPattern.motif
     local motifPhase = borderPhases[mid]
     if motif and motifPhase then return at(motif, motifPhase[1] + dx, motifPhase[2] + dy) end
-    local row = treeRows[mid]
+    local row = fam == "frlg" and treeRows[mid]
     if row then
       if not Native.hasMid(pair, row[1]) or not Native.hasMid(pair, row[2]) then return nil end
       if y == sy then return row[(row[3] + dx) % 2 + 1] end
@@ -173,10 +207,10 @@ function S.new(layout, pair, Fill, Native, depth)
     end
     local phase = phases[mid]
     if trees and phase then return at(trees, phase[1] + dx, phase[2] + dy) end
-    if ocean and (water[mid] or coastAvailable and oceanSide(mid, dx, dy)) then
+    if fam == "frlg" and ocean and (water[mid] or coastAvailable and oceanSide(mid, dx, dy)) then
       return at(ocean, x, y)
     end
-    if cliffs[mid] then
+    if fam == "frlg" and cliffs[mid] then
       local wall = walls[mid]
       local target = axis == "horizontal" and wall and wall[2]
         or axis == "vertical" and wall and wall[1]
@@ -184,9 +218,9 @@ function S.new(layout, pair, Fill, Native, depth)
         or 0x071
       if target and Native.hasMid(pair, target) then return target end
     end
-    if fences[mid] then return mid end
+    if fam == "frlg" and fences[mid] then return mid end
     if motif and borderPattern.gates and borderPattern.gates[mid] then return at(motif, x, y) end
-    if buildings[mid] and (motif or trees) then return at(motif or trees, x, y) end
+    if fam == "frlg" and buildings[mid] and (motif or trees) then return at(motif or trees, x, y) end
   end
   local function mergeCorner(horizontal, vertical, corner, x, y)
     if horizontal and vertical then

@@ -109,22 +109,14 @@ return function(mod)
         .. "This is a decorative backdrop, not loaded neighboring terrain. Camera bounds "
         .. "and actual black map tiles stay unchanged. TREES/WATER availability follows "
         .. "the game: incompatible tilesets use the map's own border instead. "
-        .. "EXTRUDE completes recognized trees as whole repeating patterns and replaces "
-        .. "recognized water-rock extensions with ocean water. Recognized water-facing "
-        .. "shorelines finish once, then become open water. Unknown scenery repeats "
-        .. "edge strips. Recognized buildings extend as trees, and cliffs as mountaintop "
-        .. "terrain. Viridian Forest uses its own tree pattern. Fallback strips use "
-        .. "EXTRUDE DEPTH. "
+        .. "EXTRUDE completes recognized trees, rocks, shorelines, water and other "
+        .. "boundary scenery as whole patterns extending outward; buildings extend as "
+        .. "trees and cliffs as mountaintop or continued wall terrain. Viridian Forest "
+        .. "uses its own tree pattern. Only unrecognized scenery repeats its single "
+        .. "edge tile outward instead. "
         .. "Indoors and underground, EXTRUDE automatically uses BLACK instead. "
         .. "With Tilt, the pattern follows the same ground perspective. Any space above "
         .. "the horizon stays black. NORMAL uses the game's own rendering." },
-    { key = "extrude_depth", label = "EXTRUDE DEPTH", type = "number",
-      default = 1, min = 1, max = 16, step = 1,
-      help = "EXTRUDE's unrecognized scenery only. Copy 1 to 16 rows of tiles from inside each map "
-        .. "edge and repeat them outward. The nearest repeated tile is the boundary "
-        .. "tile, then the strip runs inward and repeats. Corners repeat the matching "
-        .. "corner patch. Depth is limited by the map's size. Recognized scenery uses "
-        .. "whole tree patterns or water instead. No playable area is added." },
     { key = "transition", label = "AREA TRANSITION", type = "choice", default = "fade",
       choices = { { "NONE", "none" }, { "FADE", "fade" },
         { "SLIDE", "slide" } },

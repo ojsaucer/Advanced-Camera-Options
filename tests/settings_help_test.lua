@@ -133,7 +133,7 @@ return function(ctx)
     local expected = { mode = true, hybrid_zoom = true, zoom_style = true, zoom = true, max_zoom = true, framing = true,
       padding = true, connected = true, resolution = true, screen_filter = true, void_fill = true, transition = true,
       duration = true, experimental = true, neighbor_shade = true, neighbor_darkness = true,
-      neighbor_distance = true, extrude_depth = true }
+      neighbor_distance = true }
     local byKey = {}
     for _, row in ipairs(schema) do byKey[row.key] = row end
     local stored = game.mods.modOptions.static_camera

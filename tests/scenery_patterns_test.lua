@@ -2,6 +2,12 @@ return function(ctx)
   local T = ctx.T
   local S = assert(loadfile(ctx.root .. "\\scenery_patterns.lua"))()
   local B = assert(loadfile(ctx.root .. "\\void_backdrop.lua"))()
+  -- This whole file assumes FRLG's own verified MID families. Force that
+  -- context regardless of what any earlier test left GameVersion set to,
+  -- and restore it afterward so later tests are unaffected.
+  local GameVersion = require("src.core.GameVersion")
+  local savedVersion = GameVersion.current
+  GameVersion.current = "firered"
   local trees = { w = 2, h = 2, mids = { 0x1C, 0x1D, 0x14, 0x15 } }
   local ocean = { w = 1, h = 1, mids = { 0x1D9 } }
   local Fill = { primaryFor = function(pair) return pair == "general" and "general" or "building" end,
@@ -206,6 +212,10 @@ return function(ctx)
     mid = 0x0D6
     T.eq(r.sample(-1, 2), 0x0D6, "fence edges repeat as themselves instead of falling into tree logic")
     T.eq(r.sample(-1, -1), 0x0D6, "fence corners keep the same fence MID when both sides agree")
+    for _, m in ipairs({ 0x0F4, 0x29B, 0x29C, 0x2D3 }) do
+      mid = m
+      T.eq(r.sample(-1, 2), m, "guardrail/additional fence posts also repeat as themselves")
+    end
   end
   layout.midAt = function(_, x, y)
     if x == 0 then return 0x06D end
@@ -243,7 +253,63 @@ return function(ctx)
     "missing oriented wall preserves strip fallback instead of wrong plateau")
   Native.hasMid = function() return true end
 
-  if not love._staticCameraGpu then return end
+  -- Emerald ships an entirely different ROM with its own "general"-primary
+  -- tileset; FRLG-verified hardcoded MIDs (cliffs, water quarters, fences,
+  -- forest/pattern-bush/safari borders, and FRLG's phase-alias table) must
+  -- never fire there even if they numerically coincide with something in
+  -- Emerald's own atlas. The dynamically-sourced tree/water quadrant (driven
+  -- by the engine's own per-family VoidFill border, not a hardcoded FRLG
+  -- list) is family-agnostic and should keep working for Emerald with
+  -- Emerald's own border shape.
+  mid = 0x1C
+  layout.midAt = midAt
+  if type(GameVersion.layout) == "function" and GameVersion.VERSIONS and GameVersion.VERSIONS.emerald then
+    GameVersion.current = "emerald"
+    T.eq(GameVersion.layout(GameVersion.current), "rse", "fixture actually exercises the rse layout")
+    -- FRLG's own hardcoded families never fire under rse, even reusing the
+    -- exact FRLG-shaped border/tree data and numerically-FRLG MIDs.
+    mid = 0x0B -- FRLG-only tree phase alias
+    T.eq(S.new(layout, "general", Fill, Native, 1).sample(-1, 2), nil,
+      "FRLG's tree phase aliases never engage outside frlg layout")
+    mid = 0x068 -- FRLG-only cliff/wall MID
+    T.eq(S.new(layout, "general", Fill, Native, 1).sample(-1, 2), nil,
+      "FRLG's cliff/wall family never engages outside frlg layout")
+    mid = 0x0D6 -- FRLG-only fence MID
+    T.eq(S.new(layout, "general", Fill, Native, 1).sample(-1, 2), nil,
+      "FRLG's fence family never engages outside frlg layout")
+    mid = 0x1C -- the fixture's own base tree quadrant tile
+    T.eq(S.new(layout, "general", Fill, Native, 1).sample(-1, 2), 0x1D,
+      "the family-agnostic tree quadrant (driven by the engine's own per-family "
+      .. "border, not a hardcoded FRLG list) still completes under rse")
+    -- Emerald's own verified General tree quadrant (Littleroot Town/Oldale
+    -- Town/Route 101/Petalburg Woods' authored border), with its second,
+    -- visually distinct canopy variant one column over in the atlas.
+    local emeraldTrees = { w = 2, h = 2, mids = { 0x1D4, 0x1D5, 0x1DC, 0x1DD } }
+    local oldBorderFor = Fill.borderFor
+    Fill.borderFor = function(mode) return mode == "trees" and emeraldTrees or ocean end
+    mid = 0x1D4
+    local er = S.new(layout, "general", Fill, Native, 1)
+    T.eq(er.sample(-1, 2), 0x1D5, "Emerald's own tree quadrant completes on its authored border")
+    T.eq(er.sample(-1, -1), 0x1DD, "Emerald's own tree quadrant continues around corners")
+    mid = 0x1D6
+    T.eq(er.sample(5, 2), 0x1D5, "Emerald's second canopy variant completes using the base quadrant")
+    T.eq(er.sample(2, 6), 0x1D4, "Emerald's second canopy variant continues vertically via the base quadrant")
+    Native.hasMid = function(_, m) return m ~= 0x1D6 and m ~= 0x1D7 and m ~= 0x1DE and m ~= 0x1DF end
+    mid = 0x1D6
+    T.eq(S.new(layout, "general", Fill, Native, 1).sample(5, 2), nil,
+      "Emerald's second canopy variant requires all of its own atlas slots to be present")
+    mid = 0x1D4
+    T.eq(S.new(layout, "general", Fill, Native, 1).sample(-1, 2), 0x1D5,
+      "Emerald's base quadrant does not require the second canopy variant's atlas slots")
+    Native.hasMid = function() return true end
+    Fill.borderFor = oldBorderFor
+    GameVersion.current = "firered"
+  end
+
+  if not love._staticCameraGpu then
+    GameVersion.current = savedVersion
+    return
+  end
   local lg = love.graphics
   local originalFill, originalNative = package.loaded["src.core.game3.void_fill"],
     package.loaded["src.core.game3.tileset_native"]
@@ -330,5 +396,6 @@ return function(ctx)
   backdrop.dispose()
   package.loaded["src.core.game3.void_fill"], package.loaded["src.core.game3.tileset_native"] = originalFill, originalNative
   for _, o in ipairs(owned) do o:release() end
+  GameVersion.current = savedVersion
   if not ok then error(err, 0) end
 end

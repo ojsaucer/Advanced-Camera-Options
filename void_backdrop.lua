@@ -47,6 +47,52 @@ function B.new(warn, shade, Scenery)
     strips, stripKey = nil, nil
     canvas, quad, width, height, failed = nil, nil, nil, nil, nil
   end
+  -- A walkable boundary tile (plain ground, tall grass, a path, ...) must
+  -- never repeat into the void: doing so implies more walkable terrain
+  -- exists past the area's own edge, which is never true. Only unrecognized
+  -- scenery reaches this fallback (recognized trees/rocks/water/fences/walls
+  -- are already always non-walkable), so substitute the nearest non-walkable
+  -- tile found along the same boundary edge instead. An edge with no
+  -- non-walkable tile anywhere (an entirely open, unfenced boundary) keeps
+  -- its own tile as a last resort; there is nothing better to show.
+  local function isWalkable(layout, x, y, Perm)
+    if not Perm or not layout.collAt then return false end
+    local ok, coll = pcall(layout.collAt, layout, x, y)
+    return ok and Perm.isWalkable(coll)
+  end
+  local function searchRow(layout, w, sy, sx, Perm)
+    for radius = 1, w do
+      for _, dx in ipairs({ -radius, radius }) do
+        local x = sx + dx
+        if x >= 0 and x < w and not isWalkable(layout, x, sy, Perm) then
+          return layout:midAt(x, sy), radius
+        end
+      end
+    end
+  end
+  local function searchColumn(layout, h, sx, sy, Perm)
+    for radius = 1, h do
+      for _, dy in ipairs({ -radius, radius }) do
+        local y = sy + dy
+        if y >= 0 and y < h and not isWalkable(layout, sx, y, Perm) then
+          return layout:midAt(sx, y), radius
+        end
+      end
+    end
+  end
+  local function fallbackMid(layout, w, h, sx, sy, axis, Perm)
+    local mid = layout:midAt(sx, sy)
+    if not isWalkable(layout, sx, sy, Perm) then return mid end
+    if axis == "x" then
+      return (searchRow(layout, w, sy, sx, Perm)) or mid
+    elseif axis == "y" then
+      return (searchColumn(layout, h, sx, sy, Perm)) or mid
+    end
+    local rowMid, rowRadius = searchRow(layout, w, sy, sx, Perm)
+    local colMid, colRadius = searchColumn(layout, h, sx, sy, Perm)
+    if rowMid and (not colMid or rowRadius <= colRadius) then return rowMid end
+    return colMid or mid
+  end
   local function extrude(layout, pair, depth)
     local w, h = layout.width, layout.height
     depth = tonumber(depth) or 1
@@ -81,8 +127,16 @@ function B.new(warn, shade, Scenery)
       warn("extrude-tiles", "Extruded map tiles are unavailable; keeping a black backdrop.")
       return nil
     end
+    local okPerm, Perm = pcall(require, "src.core.CollPermissions")
+    if not okPerm then Perm = nil end
     for _, region in ipairs(regions) do
       region.cells = {}
+      local axis
+      if not region.overlay then
+        local vertInf = region.top == -math.huge or region.bottom == math.huge
+        local horizInf = region.left == -math.huge or region.right == math.huge
+        axis = vertInf and horizInf and "corner" or vertInf and "x" or horizInf and "y" or nil
+      end
       for y = 0, region.h / 16 - 1 do
         for x = 0, region.w / 16 - 1 do
           local wx, wy = region.x / 16 + x, region.y / 16 + y
@@ -90,7 +144,10 @@ function B.new(warn, shade, Scenery)
           if region.overlay then mid = content.finish(wx, wy)
           else
             mid = content and content.sample(wx, wy)
-            if mid == nil then mid = layout:midAt(B.sample(wx, w, depth), B.sample(wy, h, depth)) end
+            if mid == nil then
+              local sx, sy = B.sample(wx, w, depth), B.sample(wy, h, depth)
+              mid = axis and fallbackMid(layout, w, h, sx, sy, axis, Perm) or layout:midAt(sx, sy)
+            end
           end
           if mid ~= nil then
             local slot = Native.slotFor(native, mid)

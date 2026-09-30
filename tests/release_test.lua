@@ -4,6 +4,7 @@ local T = require("tests.harness").suite("Static Camera release metadata")
 local Manifest = require("src.mods.Manifest")
 local ModUpdate = require("src.mods.ModUpdate")
 local Json = require("src.link.Json")
+local GameVersion = require("src.core.GameVersion")
 
 local function read(path)
   local file = assert(io.open(path, "rb"))
@@ -17,7 +18,15 @@ T.eq(m.id, "static_camera", "existing mod ID is preserved")
 T.eq(m.github, "ojsaucer/Advanced-Camera-Options", "launcher recognizes update repository")
 T.eq(m.api, 2, "mod API remains unchanged")
 T.eq(m.game_version, ">=0.3.19 <0.4.0", "engine compatibility is unchanged")
-T.same(m.games, { "firered", "leafgreen" }, "only supported games are declared")
+-- The manifest declares the "gen3" generation token, not individual game ids,
+-- so it resolves to whichever Gen 3 games THIS engine knows (firered/leafgreen
+-- on older engines, plus emerald once an engine adds it) without an "unknown
+-- game" load error on engines that predate a newer Gen 3 addition.
+local expectedGames = {}
+for _, id in ipairs(GameVersion.ORDER) do
+  if GameVersion.generation(id) == 3 then expectedGames[#expectedGames + 1] = id end
+end
+T.same(m.games, expectedGames, "declares every gen3 game this engine knows")
 T.same(m.permissions, { "engine_internals" }, "no updater network permission added")
 local card = assert(loadfile(root .. "\\mod.card"))()
 T.eq(card.contact, "https://github.com/" .. m.github, "card links to the same project")

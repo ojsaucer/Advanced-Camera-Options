@@ -33,7 +33,7 @@ function Help.start(mod, rows, compatibility, preview)
   end
   local function supported()
     local version = GameVersion.get()
-    return version == "firered" or version == "leafgreen"
+    return version == "firered" or version == "leafgreen" or version == "emerald"
   end
   local function managerLayer()
     for _, layer in ipairs(Stack._layers) do

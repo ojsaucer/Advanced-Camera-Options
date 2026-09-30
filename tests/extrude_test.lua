@@ -101,6 +101,55 @@ local function run(ctx)
   check(desc.pixels == pixels and pixels == 8 * 3 * 2 * 256,
     "budget counts every corner and edge texture")
   check(reads == pixels / 256, "only bounded strips are sampled")
+
+  -- Walkable boundary tiles (plain ground, tall grass, paths, ...) must never
+  -- repeat into the void, since that would imply more walkable terrain exists
+  -- past the area's own edge. The resolver should instead search along that
+  -- same boundary edge for the nearest non-walkable (fence/tree/wall/water)
+  -- tile, falling back to the boundary tile itself only when no such
+  -- neighbor exists anywhere along that edge.
+  do
+    local width, height = 6, 1
+    local coll = { 0, 0, 7, 0, 0, 7 } -- CollPermissions: 0 = walkable land, 7 = wall
+    local fbLayout = { width = width, height = height,
+      midAt = function(_, x) return x end,
+      collAt = function(_, x) return coll[x + 1] end }
+    local fbDesc = backdrop.resolve(fbLayout, "fixture", "extrude", 1)
+    check(fbDesc ~= nil, "walkable-fallback fixture still resolves to an EXTRUDE description")
+    local midOfQuad = {}
+    for mid = 0, 5 do midOfQuad[under[mid]] = mid end
+    local function midAtCell(region, localX, localY)
+      for _, cell in ipairs(region.cells) do
+        if cell.x == localX * 16 and cell.y == localY * 16 then return midOfQuad[cell.under] end
+      end
+    end
+    -- x=2 and x=5 are already non-walkable (kept as-is); every walkable
+    -- column substitutes whichever non-walkable neighbor is nearest.
+    local want = { [0] = 2, [1] = 2, [2] = 2, [3] = 2, [4] = 5, [5] = 5 }
+    local checkedStrip, checkedCorner = false, false
+    for _, region in ipairs(fbDesc.regions) do
+      local vertInf = region.top == -math.huge or region.bottom == math.huge
+      local horizInf = region.left == -math.huge or region.right == math.huge
+      if vertInf and not horizInf then
+        for x = 0, width - 1 do
+          check(midAtCell(region, x, 0) == want[x],
+            "walkable boundary tiles substitute the nearest non-walkable tile along the edge")
+        end
+        checkedStrip = true
+      elseif vertInf and horizInf then
+        -- Diagonal corner: searches both directions from the actual corner
+        -- tile; height 1 means the vertical search always dead-ends here, so
+        -- every corner must reduce to the same result as its adjacent
+        -- horizontal-strip column.
+        local cornerX = region.left == -math.huge and 0 or width - 1
+        check(midAtCell(region, 0, 0) == want[cornerX],
+          "corner regions substitute using the same nearest-neighbor search as their adjacent edge")
+        checkedCorner = true
+      end
+    end
+    check(checkedStrip and checkedCorner, "walkable-fallback fixture exercises both strip and corner regions")
+  end
+
   local frame = { x = -80, y = -80, dx = 0, dy = 0, scale = 1 }
   local output
   if gpu then

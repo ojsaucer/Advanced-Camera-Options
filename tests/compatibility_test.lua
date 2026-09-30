@@ -70,7 +70,7 @@ return function(ctx)
   end
   local ok, err = xpcall(function()
     reset()
-    for _, v in ipairs({ "0.3.19", "0.3.22" }) do
+    for _, v in ipairs({ "0.3.19", "0.3.22", "0.3.33" }) do
       Version.engine, Version.modApi = v, 2
       T.check(C.new(mod).allowed(), "tested engine works without opt-in: " .. v)
     end
@@ -119,11 +119,11 @@ return function(ctx)
       fs = T.sdk.memfs(ctx.files), data = T.sdk.gen3Data(), generation = 3,
     })
     T.eq(#loaded.errors, 0, "real loader admits untested patch to expose opt-in")
-    T.eq(#(loaded.loader.optionSchemas.static_camera or {}), 18, "real untested loader exposes opt-in setting")
+    T.eq(#(loaded.loader.optionSchemas.static_camera or {}), 17, "real untested loader exposes opt-in setting")
     loaded.release()
     reset()
     start()
-    T.eq(#schema, 18, "untested engine still registers all settings")
+    T.eq(#schema, 17, "untested engine still registers all settings")
     T.eq(settings.experimental, false, "experimental option defaults off")
     tick(game)
     T.eq(game.draw, baseDraw, "untested engine has no game wrapper before opt-in")

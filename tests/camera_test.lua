@@ -256,14 +256,18 @@ P.px, P.py = 80, 96
 P.walkPhase, P.drawFlip = function() return 0 end, function() return false end
 Collision.bindMap({ data = {} }, "FIXTURE", def)
 
-for _, version in ipairs({ "firered", "leafgreen" }) do
+-- Older engines predate Emerald support entirely; only exercise it when the
+-- running engine's own GameVersion table actually knows the id.
+local versions = { "firered", "leafgreen" }
+if GV.VERSIONS and GV.VERSIONS.emerald then versions[#versions + 1] = "emerald" end
+for _, version in ipairs(versions) do
   GV.current = version
   local run = T.sdk.loadMod("mods/static_camera", {
     fs = T.sdk.memfs(files), data = T.sdk.gen3Data(), generation = 3,
   })
   T.eq(#run.errors, 0, version .. " real loader accepts entry: " .. tostring(run.errors[1]))
   T.check(run.loader.exports.static_camera ~= nil, "entry actually executed")
-  T.eq(#(run.loader.optionSchemas.static_camera or {}), 18, "eighteen settings registered")
+  T.eq(#(run.loader.optionSchemas.static_camera or {}), 17, "seventeen settings registered")
   local rows, byKey, keys = run.loader.optionSchemas.static_camera, {}, {}
   for _, row in ipairs(rows) do
     byKey[row.key], keys[#keys + 1] = row, row.key
@@ -275,7 +279,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   end
   T.same(keys, { "mode", "connected", "neighbor_shade", "neighbor_darkness", "neighbor_distance",
     "hybrid_zoom", "zoom_style", "zoom", "max_zoom", "framing", "padding", "resolution", "screen_filter",
-    "void_fill", "extrude_depth", "transition", "duration", "experimental" },
+    "void_fill", "transition", "duration", "experimental" },
     "Full settings precede Bounded settings, followed by shared settings")
   T.eq(byKey.resolution.default, "retro", "existing visual style remains the default")
   T.eq(byKey.screen_filter.default, "crisp", "SCREEN smoothing is opt-in")
@@ -508,6 +512,7 @@ for _, version in ipairs({ "firered", "leafgreen" }) do
   F.draw = original
   lg.setCanvas()
 end
+GV.current = "firered"
 assert(loadfile(root .. "\\tests\\settings_help_test.lua"))()({ T = T, root = root })
 assert(loadfile(root .. "\\tests\\boundary_shading_test.lua"))()({ T = T, root = root })
 assert(loadfile(root .. "\\tests\\scenery_patterns_test.lua"))()({ T = T, root = root })

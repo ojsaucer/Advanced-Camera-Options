@@ -128,7 +128,7 @@ return function(ctx)
     stripes:release()
     native.image = source
     local settings, scene = ctx.settings, ctx.scene
-    for _, key in ipairs({ "connected", "neighbor_shade", "neighbor_darkness", "neighbor_distance", "extrude_depth" }) do
+    for _, key in ipairs({ "connected", "neighbor_shade", "neighbor_darkness", "neighbor_distance" }) do
       replace(settings, key, settings[key])
     end
     local original = scene.data.maps.FIXTURE
@@ -352,7 +352,7 @@ return function(ctx)
       local darkness, distance = 0.6, 128 -- 8 tiles * 16 world px
       local dx = 328
       for _, fill in ipairs({ "game", "extrude" }) do
-        settings.void_fill, settings.extrude_depth = fill, 2
+        settings.void_fill = fill
         local base = fill == "game" and colors[2] or colors[1]
         for _, shadeMode in ipairs({ "off", "uniform", "gradient" }) do
           settings.neighbor_shade = shadeMode
@@ -433,8 +433,7 @@ return function(ctx)
               return (vw - 480 * scale) / 2 + x * scale, (vh - 272 * scale) / 2 + y * scale
             end }
           end
-          for _, depth in ipairs({ 1, 2, 8, 16 }) do
-            settings.extrude_depth = depth
+          for _, depth in ipairs({ 1 }) do
             local image = ctx.capture("screen", 1, vw, vh)
             local checked = 0
             for t = 0.1, 0.91, 0.2 do
@@ -474,7 +473,7 @@ return function(ctx)
       end
       Fill._borders = {}
       def.midLayout = { width = 4, height = 30, midAt = function() return 0 end }
-      settings.mode, settings.void_fill, settings.extrude_depth = "full", "extrude", 1
+      settings.mode, settings.void_fill = "full", "extrude"
       local actual = ctx.capture("screen", 1, 720, 480)
       -- The primary's left edge is x=328: whole-pattern continuation alternates
       -- the blue right half at x=-1 and green left half at x=-2.

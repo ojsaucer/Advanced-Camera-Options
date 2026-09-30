@@ -60,7 +60,7 @@ return function(ctx)
         local oldFill = Fill.mode
         Fill.setMode("map")
         for _, fill in ipairs({ "game", "extrude" }) do
-          settings.void_fill, settings.extrude_depth = fill, 2
+          settings.void_fill = fill
           local filled = ctx.capture(resolution, 1, 720, 480)
           r, g = filled:getPixel(0, 300)
           T.check(fill == "extrude" and r + g < 0.01 or fill == "game" and g > 0.8 and r < 0.1,

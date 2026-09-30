@@ -5,11 +5,11 @@ This page contains the implementation details intentionally kept out of the proj
 
 ## Compatibility
 
-The Lua runtime targets FireRed and LeafGreen, mod API 2. Engine versions
-**0.3.19 and 0.3.22** have passed the camera regression suite.
+The Lua runtime targets FireRed, LeafGreen and Emerald, mod API 2. Engine
+versions **0.3.19, 0.3.22 and 0.3.33** have passed the camera regression suite.
 
 The manifest admits `>=0.3.19 <0.4.0`. The runtime additionally rejects development
-and prerelease version strings. Stable versions outside the tested pair require
+and prerelease version strings. Stable versions outside the tested trio require
 the explicit `UNTESTED ENGINE -> TRY` opt-in; the default is OFF.
 Different engine families or mod API majors require a new compatibility audit.
 
@@ -501,3 +501,262 @@ specific reported saves; map/MID identification for most reported screenshots
 was reduced to confidently-verified MID families and fixed structurally rather
 than confirmed against one exact map (Safari Zone and Six Island were
 confidently identified by exact border signature).
+
+## 0.16.0 Emerald compatibility
+
+Gen1Recomp 0.3.33 added Pokemon Emerald as a third `game3`-engine game
+alongside FireRed/LeafGreen, sharing the same hook/module surface but with
+`GameVersion.layout(id)` now returning `"frlg"` or `"rse"` (Emerald) rather
+than always `"frlg"`. Confirmed via extracted 0.3.19/0.3.22/0.3.33 engine
+modules and the current upstream dev source tree (hashed identical for every
+module this mod touches) that no required module/function this mod depends on
+(`field_view`, `map`, `player`, `runtime`, `void_fill`, `tileset_native`,
+`field_weather`, `weather`, `connections`, `battle_transition`, `Tilt`,
+`Renderer`) changed shape between engine versions; `compatibility.lua`'s
+capability checks therefore needed no changes, and 0.3.33 was added to its
+`tested` set after full validation.
+
+Three call sites previously hardcoded `version == "firered" or "leafgreen"`
+and needed `"emerald"` added: the adapter's own attach gate (`update` in
+`adapter_gen3.lua`), and `settings_help.lua`'s `supported()`. `compatibility.lua`
+itself is already version/capability-based, not game-based, so it was
+unaffected.
+
+`manifest.json`'s `games` field cannot list `"emerald"` by name and stay
+compatible with older engines: `src/mods/Manifest.lua` treats any token an
+engine's `GameVersion.VERSIONS` doesn't recognize as a **load error** for API 2
+mods (`violation(strict, ...)` where `strict = (api == 2)`), so a manifest
+naming `"emerald"` literally would refuse to load the entire mod — including
+for FireRed/LeafGreen — on any pre-0.3.33 engine. `src/mods/ModTargets.lua`
+instead supports generation tokens (`"gen3"`) that expand to
+`GameVersion.ORDER` filtered by `GameVersion.generation(id) == 3` **at the
+running engine's own resolution time**: older engines expand it to just
+`{firered, leafgreen}` (no unknown-token error since gen3 itself is always
+known), while 0.3.33+ expands it to include `emerald` automatically, with no
+further manifest changes needed for this or any later Gen 3 addition. The
+manifest now declares `"games": ["gen3"]`. This is the same pattern the
+engine's own `docs/modding.md` demonstrates for Gen 1/2 (`"games": ["gen1",
+"gen2"]`). The adapter's own explicit `firered`/`leafgreen`/`emerald` allowlist
+remains the actual attachment gate, so a hypothetical future Gen 3 game that
+this broad manifest token would silently also cover cannot actually engage the
+camera until specifically added there.
+
+`scenery_patterns.lua`'s content-aware EXTRUDE rules are verified against
+FireRed/LeafGreen's own "General" tileset ROM art specifically. Emerald ships
+a completely different ROM whose own primary tileset is also conceptually
+named `"general"` (confirmed via `void_fill.lua`'s `FAMILY` table:
+`frlg.primary = "general"`, `rse.primary = "general"`) and whose actual native
+tileset pair ids use a different naming scheme entirely (semantic, e.g.
+`general__mauville`, vs FireRed/LeafGreen's ROM-address-based
+`general__rom_082d4af4`), so the existing `Fill.primaryFor(pair) ~= "general"`
+guard alone cannot distinguish them. Added `frlgLayout()`, which checks
+`GameVersion.layout(GameVersion.get()) == "frlg"` (defaulting true when the
+function or table doesn't exist at all, matching 0.3.19/0.3.22's actual
+reality of only ever having frlg-layout games), and gates the top of `S.new`
+on it. Emerald therefore always falls back to plain edge-strip repetition,
+identically to any other unrecognized tileset; no new fallback path was
+needed.
+
+Test-harness state hygiene: the real `src.core.GameVersion` module is shared
+process-wide, so `camera_test.lua`'s per-version loop (now `firered`,
+`leafgreen`, and conditionally `emerald` when the running engine's own
+`GameVersion.VERSIONS` table knows it) must reset `GameVersion.current` after
+the loop, and `scenery_patterns_test.lua` independently saves/forces/restores
+it, so later test files never inherit a stale "emerald" (rse) context that
+would silently gate off the FRLG-only assertions they depend on.
+`resolution_test.lua`'s nested `camera_features_test`/`seam_test`/
+`tilt_test`/`void_fill_test` sub-suite (already re-run once per outer loop
+iteration) is skipped specifically for the `emerald` iteration: those
+suites assert exact FRLG field-weather shading tint and FRLG-only EXTRUDE
+tree completion, both of which correctly render differently once
+`Weather.rseEngine()` (keyed off `Profile.forSession`'s resolved `family`)
+takes over Emerald's weather rendering — a genuine, expected engine-family
+difference outside this mod's own scope, not a regression, and already fully
+exercised for both existing spellings.
+
+Final validation with actual engine modules, run three times (0.3.19, 0.3.22,
+0.3.33) plus a fourth pass with `GameVersion.VERSIONS.emerald` active:
+
+| Engine | Headless camera | Real LÖVE camera | Extrusion (GPU) |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 18,448 | 770,217 | 58,398 |
+| 0.3.22 | 18,448 | 770,229 | 58,398 |
+| 0.3.33 (incl. Emerald) | 18,685 | 780,900 | 58,398 |
+
+These exercise the mod's own generic camera/geometry/backdrop logic under
+Emerald with synthetic fixtures (the same `tests.modkit` harness used for
+FireRed/LeafGreen, not extracted Emerald ROM art), confirming the mod attaches,
+renders, and reports settings identically; they do not replay an actual
+Emerald save file.
+
+## 0.16.0 continued: EXTRUDE DEPTH removal, fence expansion, Emerald trees
+
+Removed the `extrude_depth` setting entirely (main.lua, adapter_gen3.lua's
+signature/cache key, all tests). `void_backdrop.lua`'s `extrude()` and
+`scenery_patterns.lua`'s `S.new` still take a `depth` parameter (used
+internally by strip-fallback and period math), but the adapter now always
+passes the literal `1`. Multi-row strip fallback looked less polished than a
+single repeated boundary tile, and made the setting itself redundant now that
+recognized scenery is completed as whole patterns instead of repeated strips.
+
+### FRLG boundary-tile survey methodology
+
+To find genuinely unrecognized *repeating pattern* scenery (as opposed to
+plain ground/path textures, which already look correct via simple strip
+repetition), a temporary Lua script parsed every General-primary `.mid`
+layout file directly (binary format: 4-byte `"SVML"` magic, u16 version,
+u16 storage width/height, u16 true width/height, u8 border width/height,
+then `borderWidth*borderHeight` border MIDs at 2 bytes each with no
+collision/elevation byte, then `storageWidth*storageHeight` map cells at
+4 bytes each: MID u16, collision u8, elevation u8 — storage dimensions,
+not true dimensions, match `layout.width`/`layout.height` as exposed to this
+mod, confirmed against `native/manifest.lua`'s own recorded width/height per
+map), then read every real map's own actual outer-edge cells (not the small
+authored "border" void-fill blob, which is a separate, already-handled
+concept) to build a frequency table of every distinct MID appearing on a map
+boundary. Cross-referencing against every MID already recognized by
+`scenery_patterns.lua` left a small set of new candidates to inspect visually
+via a temporary LÖVE tool that loaded the real `tileset_native.lua`/
+`native_pack.lua`/`palette.lua` modules against a fake `cache:read()`
+implementation pointing at the locally imported ROM data on disk (same
+`data/generated/gba/native/<pair>/mids.idx` structure the engine itself
+reads), rendering requested MIDs' actual under/over quads at high
+magnification with labels. Both temporary tools and their output images were
+deleted after use; no extracted art was committed.
+
+This confirmed most previously-unrecognized edge MIDs are either indoor/cave
+content (already forced to BLACK regardless), plain ground/sand/grass
+textures that already look correct under simple repetition (a uniform or
+lightly-textured surface has no "cut" to create a seam, unlike a discrete
+multi-tile shape), or singular one-off decorative details at a single map
+(consistent with the user's own earlier observation that such artifacts are
+"part of the map itself" and not meant to repeat). The one clearly-verified,
+high-confidence addition was a family of guardrail/handrail posts
+(`29B/29C` — Route 11's bridge, also seen at Rock Tunnel/Victory Road
+entrances — and `2D3`, plus wooden fence variant `0F4`), added to the
+existing self-repeating `fences` set alongside the wooden fence posts.
+Several other candidates (canyon/mesa layered-rock cliff textures at Mt.
+Ember/Sevault Canyon/Route 23-24/Indigo Plateau, and diagonal water-meets-rock
+transitions at Four/Seven Island) were visually confirmed to be directional,
+but deriving their exact orientation mapping with the same confidence as the
+existing `walls` table would need substantially more verification than this
+pass allowed; they remain on strip fallback rather than risk an incorrect
+guess, matching this project's established "verify or leave alone" policy.
+
+### Emerald tree support
+
+`family()` replaces the former `frlgLayout()` boolean gate, returning
+`GameVersion.layout(GameVersion.get())` (defaulting to `"frlg"` when that
+function doesn't exist, matching 0.3.19/0.3.22's actual reality of only ever
+booting frlg-layout games). Critically, `Fill.borderFor("trees")`/`("water")`
+were already **family-agnostic**: `void_fill.lua`'s own `VoidFill.FAMILY`
+table and dynamic `config()` already resolve the correct source map
+(`FR_PALLET_TOWN` vs `EM_LITTLEROOT_TOWN`) for whichever ROM is actually
+running, so the *generic* quadrant-phase derivation from `trees.mids` (used
+by both the base 2x2 match and any recognized alias) never needed a family
+check at all — only the **hardcoded FRLG-numbered** tables (`water`,
+`cliffs`/`walls`, `shore`, `fences`, `buildings`, the `forestBorder`/
+`patternBushBorder`/`safariBorder` 3x2 motifs, and FRLG's own
+`0x1C/0x1D/0x14/0x15`-specific phase-alias block) needed gating to
+`fam == "frlg"`, since their specific MID numbers could otherwise coincide
+with entirely different art in Emerald's own General atlas.
+
+Verified via the same border-signature survey run against Emerald's own
+`data/generated/gba/native/layouts/EM_*.mid` files (identical binary format,
+confirmed independently — Emerald's `native_version = 2` in its manifest
+differs from FRLG's `6`, but only as unrelated importer metadata, not a
+layout format change) that Emerald's own General tree border is the 2x2
+quadrant `{0x1D4, 0x1D5, 0x1DC, 0x1DD}` (19 maps: Littleroot Town, Oldale
+Town, every `EM_ROUTE1xx`, Petalburg Woods, and more), directly analogous to
+FRLG's `{0x1C, 0x1D, 0x14, 0x15}`. Atlas preview confirmed a second,
+visually distinct canopy variant one column over in the same atlas region:
+`{0x1D6, 0x1D7, 0x1DE, 0x1DF}`, added as an Emerald-specific phase alias
+(gated `fam == "rse"`, requiring all four of its own MIDs via `Native.hasMid`
+before enabling, exactly like every other alias in this file) that projects
+onto the same base quadrant art when completing outward — matching the
+existing, established FRLG alias behavior verified by the same mechanism.
+No 3x2 border motif (Emerald's equivalent of Viridian Forest) was found in
+this pass; every other Emerald border signature surveyed was either a
+uniform single-MID border (already correct via plain fallback) or indoor-only.
+Rocks, water, fences and walls remain unrecognized on Emerald and use strip
+fallback, an honest scope limit rather than an unverified guess.
+
+Final validation with actual engine modules on all three tested engines:
+
+| Engine | Headless camera | Real LÖVE camera | Extrusion (GPU) |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 18,336 | 742,733 | 58,398 |
+| 0.3.22 | 18,336 | 742,745 | 58,398 |
+| 0.3.33 (incl. Emerald) | 18,580 | 753,423 | 58,398 |
+
+New regression coverage: the extra fence/guardrail MIDs; that FRLG's
+hardcoded families (phase aliases, cliffs, fences) never engage under `rse`
+even when reusing the exact same FRLG-shaped fixture data and numerically-FRLG
+MIDs; that the family-agnostic tree quadrant mechanism itself keeps working
+under `rse` given `rse`-shaped border data; and Emerald's own tree quadrant
+and its second canopy variant, including requiring the variant's own atlas
+slots independently of the base quadrant's. Each new assertion was confirmed
+to actually fail against a deliberately reverted implementation before being
+finalized, not just written to pass.
+
+## 0.16.0 continued: walkable-tile fallback
+
+Reported problem: EXTRUDE's plain single-tile-strip fallback (the last resort
+for any unrecognized boundary tile) repeated whatever tile sat at the map's
+edge outward regardless of whether that tile was walkable ground. A plain
+grass or tall-grass boundary tile therefore repeated into the void looking
+like walkable terrain continued past the area's actual edge — misleading,
+since the camera bounds and real collision both stop at the authored map
+rectangle. Recognized families (trees, rocks, water, fences, walls) were
+never affected, since all of them are already non-walkable by definition;
+only the generic strip fallback needed this fix.
+
+`void_backdrop.lua`'s `extrude()` now classifies each unrecognized strip/
+corner region by its axis before filling cells: `ix == 0` regions (above/
+below the map) get `axis = "x"` (search across columns at the fixed boundary
+row); `iy == 0` regions (left/right of the map) get `axis = "y"` (search
+across rows at the fixed boundary column); the four diagonal corner regions
+get `axis = "corner"` (search both directions from the actual corner cell,
+preferring whichever non-walkable neighbor is fewer tiles away, with an exact
+tie or a dead-end axis falling back to the row result). The `content.finish`
+overlay cells (the separate, always-finite one-tile shoreline-completion rim)
+are explicitly excluded from this substitution, since they are already an
+intentionally-placed content-aware completion, not the generic strip
+fallback.
+
+Walkability itself is read via the real `src.core.CollPermissions` module
+(`Perm.isWalkable(layout:collAt(x, y))`), the same authority the engine's own
+`Collision.isWalkable` ultimately defers to — not a reimplemented or
+approximated table, so this can never disagree with actual player movement
+rules. `layout:collAt` is optional per the existing `LayoutNative`/test-fixture
+contract; its absence (or a `pcall`-caught error reading it) is treated as
+"not walkable" defensively, so a layout without collision data behaves exactly
+like today's un-substituted fallback rather than crashing. The search radius
+grows outward one tile at a time (checking both directions of the axis at
+each radius before expanding), so the substitution always finds the nearest
+qualifying neighbor rather than a directionally-biased one. An edge with no
+non-walkable tile anywhere along it (a fully open, unfenced boundary) keeps
+its own original boundary tile, matching the pre-existing behavior for that
+edge case — there is nothing better to show.
+
+New regression coverage added to `tests/extrude_test.lua` (GPU-only, since
+`extrude_test.lua` itself only runs under `love._staticCameraGpu`): a
+dedicated 6x1 fixture with an explicit walkable/non-walkable pattern
+(`CollPermissions` land/wall bytes 0/7) verifies every top/bottom-strip
+column's exact substituted MID via radius-by-radius hand-derivation, plus all
+four corner regions (including the degenerate single-row case where the
+vertical half of the corner search always dead-ends, so every corner reduces
+to its adjacent horizontal-strip result — still a real exercise of the
+corner branch's `rowMid`-vs-`colMid` selection, just with `colMid` always
+`nil`). Confirmed by temporarily forcing `Perm = nil` inside `extrude()` (in a
+disposable working copy, not committed) that the corner assertion fails with
+the exact expected walkable ground repeating, then restored, following this
+project's established verify-before-finalize practice.
+
+Final validation with actual engine modules on all three tested engines:
+
+| Engine | Headless camera | Real LÖVE camera | Extrusion (GPU) |
+| --- | ---: | ---: | ---: |
+| 0.3.19 | 18,336 | 742,733 | 58,416 |
+| 0.3.22 | 18,336 | 742,745 | 58,416 |
+| 0.3.33 (incl. Emerald) | 18,580 | 753,423 | 58,416 |

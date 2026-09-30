@@ -1,13 +1,13 @@
 {
   "id": "static_camera",
   "name": "Static Camera",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "github": "ojsaucer/Advanced-Camera-Options",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
   "category": "UI",
-  "games": ["firered", "leafgreen"],
+  "games": ["gen3"],
   "game_version": ">=0.3.19 <0.4.0",
   "priority": 100,
   "dependencies": [],
@@ -15,5 +15,5 @@
   "conflicts": [],
   "permissions": ["engine_internals"],
   "affects_link": false,
-  "description": "See whole areas at once or follow the player within map boundaries. Includes Tilt, adjustable zoom, clearer zoomed-out views and transitions for FireRed and LeafGreen."
+  "description": "See whole areas at once or follow the player within map boundaries. Includes Tilt, adjustable zoom, clearer zoomed-out views and transitions for FireRed, LeafGreen and Emerald."
 }

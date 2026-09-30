@@ -1,6 +1,6 @@
 # Advanced Camera Options
 
-**See FireRed and LeafGreen from a different perspective.**
+**See FireRed, LeafGreen and Emerald from a different perspective.**
 
 Choose a stationary whole-area view, a one-axis scrolling view, a zoomable
 Hybrid view, a camera that follows you within map edges, or the game's normal
@@ -38,8 +38,11 @@ camera.
   filtering to reduce aliasing when zoomed out.
 - **Matching backgrounds:** optionally use the game's Void Fill choice around
   the area, following Tilt and forest shade, or choose **Extrude** to repeat
-  complete recognized trees and extend water naturally, with edge strips for
-  unrecognized scenery.
+  complete recognized trees and extend water naturally, with single-tile
+  repetition for unrecognized scenery. Recognized trees are completed using
+  each game's own artwork on both FireRed/LeafGreen and Emerald; other
+  content-aware completion (rocks, water, fences, walls) is currently
+  FireRed/LeafGreen only.
 - **Clear map boundaries:** darken connected-map terrain and backgrounds uniformly or gradually
   with distance, without dimming your current map or characters.
 - **Area transitions:** choose fade, a slide toward the connected area you enter,
@@ -58,11 +61,11 @@ installations retain their settings.
 
 | | Support |
 | --- | --- |
-| Games | FireRed and LeafGreen |
-| Tested Gen1Recomp versions | **0.3.19 and 0.3.22** |
+| Games | FireRed, LeafGreen and Emerald |
+| Tested Gen1Recomp versions | **0.3.19, 0.3.22 and 0.3.33** |
 | Other stable 0.3.x versions, starting at 0.3.19 | Optional, untested: enable **UNTESTED ENGINE -> TRY** |
 | Gen 1 and Gen 2 | Planned, not available yet |
-| Ruby, Sapphire and Emerald | Not supported |
+| Ruby and Sapphire | Not supported |
 
 Untested versions are disabled by default. TRY is not a promise of compatibility.
 Development builds, engine versions outside the supported 0.3.x family, and
@@ -81,7 +84,7 @@ No compiling or programming is needed.
    [latest release](https://github.com/ojsaucer/Advanced-Camera-Options/releases/latest).
    Use the mod ZIP under **Assets**, not GitHub's **Source code** downloads.
 2. In the Gen1Recomp launcher, open **MODS -> Import mod .zip** and choose the ZIP.
-3. Enable **Static Camera** for FireRed or LeafGreen.
+3. Enable **Static Camera** for FireRed, LeafGreen or Emerald.
    Allow its declared permission if prompted.
 4. Start the game once to register the settings, then open the mod's options.
    Return to the launcher if its settings list needs refreshing.
@@ -130,7 +133,7 @@ This is an engine installer issue, not something the mod can fix before it loads
 
 ## Settings
 
-The 19 options start with camera mode, then **scenery (Full/Full-Scroll/Hybrid/Bounded)**,
+The 18 options start with camera mode, then **scenery (Full/Full-Scroll/Hybrid/Bounded)**,
 **Hybrid zoom**, **Bounded-specific**, and **shared** settings. Mode-specific options stay
 visible for configuration but only affect their named camera mode. Most changes take
 effect immediately.
@@ -150,8 +153,7 @@ effect immediately.
 | **CROP PADDING** | Adds **0-4 map tiles** around a terrain crop. |
 | **WORLD RESOLUTION** | **RETRO** keeps the original pixelated look. **SCREEN** keeps more detail when zooming out. |
 | **SCREEN FILTER** | **CRISP** (default) keeps hard pixel edges. **SMOOTH** reduces minification aliasing in SCREEN terrain and backgrounds; enlarged pixels stay crisp. Does not affect Retro or Normal mode. |
-| **VOID BACKDROP** | **BLACK** leaves black margins. **GAME** follows the game's Void Fill selection. **EXTRUDE** extends recognized outdoor scenery intelligently, with edge-strip fallback; indoors and underground stay black. |
-| **EXTRUDE DEPTH** | **1-16 tiles**, default **1**. How many inward rows to repeat for unrecognized scenery. Recognized tree patterns and water are independent of this depth. |
+| **VOID BACKDROP** | **BLACK** leaves black margins. **GAME** follows the game's Void Fill selection. **EXTRUDE** extends recognized outdoor scenery intelligently, with single-tile-strip fallback for anything unrecognized; indoors and underground stay black. |
 | **AREA TRANSITION** | **NONE**, **FADE** or **SLIDE**. Slide direction follows the map connection automatically. |
 | **TRANSITION MS** | Transition duration, **50-2000 milliseconds**. Higher means slower. |
 | **UNTESTED ENGINE** | **OFF** by default. **TRY** allows attempting an untested stable engine version in the supported range. |
@@ -188,27 +190,32 @@ Choose **VOID BACKDROP: EXTRUDE** for content-aware outdoor backgrounds:
 - Viridian Forest, Six Island's Pattern Bush, and the Safari Zone each use
   their own three-tile-wide tree/bush pattern rather than the smaller
   outdoor pattern.
-- Recognized fences repeat as themselves instead of being overwritten by
-  neighboring tree or cliff rules.
 - Recognized building and gatehouse pieces extend as trees instead of repeated
   roof fragments. Straight rock walls continue along their direction; corner
   pieces straighten to match the map edge being crossed. Other cliff extensions
   use solid mountaintop terrain.
+- Recognized fences and guardrail posts repeat as themselves instead of being
+  overwritten by neighboring tree or cliff rules.
 - Diagonal map corners blend whichever of the two meeting edges is closer,
   instead of repeating a single corner tile.
+- Walkable ground (plain grass, tall grass, paths) is never repeated into the
+  backdrop, since that would look like more walkable area exists past the
+  map's actual edge. The nearest non-walkable boundary tile along that same
+  edge is substituted instead.
+- On Emerald, recognized General-tileset trees complete the same way, using
+  Emerald's own artwork; other scenery types are not yet recognized there.
 
-Recognition currently covers verified families in FRLG's **General** tileset
-and Viridian Forest's matching tree-border set,
-not every tree, rock, shoreline or custom tileset. Unrecognized scenery keeps
-the existing **EXTRUDE DEPTH** behavior: at depth 1, each
-boundary tile repeats straight outward. At depth 3, the outermost tile repeats
-first, followed by the next two tiles inward, then the strip repeats again.
-Corners repeat the corresponding corner patch. Tiles keep their orientation.
-This is decorative, not walkable terrain, and works best on maps with suitable
-edge scenery. The source is the authored map edge, not the Terrain crop.
-Connected maps still draw over the background; this never edits real terrain.
-Indoors and underground, EXTRUDE automatically uses black so walls, decorations
-and empty map tiles do not repeat around the room.
+Recognition currently covers verified families in FireRed/LeafGreen's **General**
+tileset, Viridian Forest's matching tree-border set, and Emerald's own General
+tree border, not custom tilesets. Unrecognized scenery repeats the nearest
+non-walkable tile along that boundary edge, or its own boundary tile if that
+edge has no non-walkable tile at all; corners do the same search in both
+directions. Tiles keep their orientation. This is decorative, not walkable
+terrain, and works best on maps with suitable edge scenery. The source is the
+authored map edge, not the Terrain crop. Connected maps still draw over the
+background; this never edits real terrain. Indoors and underground, EXTRUDE
+automatically uses black so walls, decorations and empty map tiles do not
+repeat around the room.
 
 For visible map boundaries, choose **MAP SHADE**. Uniform shading provides
 a clear brightness change; Gradient starts clear at your map's boundary and
@@ -257,6 +264,11 @@ only approximate in this lower-resolution preview.
   fog, rain and cave-light effects are not extended onto the repeating background.
   Black tiles inside the map stay black, and space above a visible Tilt horizon
   stays black.
+- **EXTRUDE's content-aware completion covers only recognized families.** Trees
+  are recognized on both FireRed/LeafGreen and Emerald, each using that game's
+  own artwork. Other scenery (rocks, water, fences, walls) is currently
+  FireRed/LeafGreen only; unrecognized scenery always uses plain edge-tile
+  repetition rather than guessing at unrelated replacement tiles.
 - **Special cameras and cutscenes use the original renderer.** Door and scripted
   fades remain game-controlled rather than playing an extra mod transition.
 - **Battle animations temporarily use native pixel resolution.** The camera

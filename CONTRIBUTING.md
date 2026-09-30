@@ -3,7 +3,7 @@
 Bug reports and clear in-game feedback are welcome. Please include:
 
 - Gen1Recomp and mod versions.
-- FireRed or LeafGreen, the area, and your camera settings.
+- FireRed, LeafGreen or Emerald, the area, and your camera settings.
 - What happened, what you expected, and how to reproduce it.
 - A screenshot or relevant error message if available.
 
